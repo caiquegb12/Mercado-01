@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Mercado Central{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <div class="brand">
+          <img src="/static/logo-mercado-central.png" alt="Mercado Central" class="brand-logo" />
+          <div class="brand-text">
+            <h1>MERCADO CENTRAL</h1>
+            <p>Gestão de Contratos</p>
+          </div>
+        </div>
+        <nav>
+          <a href="/">Início</a>
+          <a href="/relatorio">Relatório</a>
+          <a href="/logout">Sair</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

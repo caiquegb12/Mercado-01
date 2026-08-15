@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+{% if success_message %}
+  <div class="toast-success" role="status" aria-live="polite">
+    ✅ {{ success_message }}
+  </div>
+{% endif %}
+{% if error_message %}
+  <div class="toast-error" role="alert" aria-live="assertive">
+    ⚠️ {{ error_message }}
+  </div>
+{% endif %}
+
+<section class="hero compact-hero">
+  <div>
+    <span class="eyebrow">Painel operacional</span>
+    <h2>Mercado Central</h2>
+  </div>
+</section>
+
+<section class="dashboard-shell">
+  <section class="quick-filters">
+    <button type="button" class="filter-btn active" data-filter="all">
+      📊 Resumo Geral
+    </button>
+    <button type="button" class="filter-btn" data-filter="fixo">
+      📋 Contratos Fixos
+    </button>
+    <button type="button" class="filter-btn" data-filter="pontual">
+      ⚡ Serviços Pontuais
+    </button>
+    <button type="button" class="filter-btn" data-filter="relatorio">
+      📄 Relatórios
+    </button>
+  </section>
+
+  <div class="filter-content active" id="content-all">
+    <section class="card">
+      <h2>📊 Resumo Geral</h2>
+      <div class="stats">
+        <div>
+          <span>Empresas</span>
+          <strong>{{ empresas | length }}</strong>
+        </div>
+        <div>
+          <span>Contratos fixos</span>
+          <strong>{{ contratos | selectattr('categoria', 'equalto', 'fixo') | list | length }}</strong>
+        </div>
+        <div>
+          <span>Serviços pontuais</span>
+          <strong>{{ contratos | selectattr('categoria', 'equalto', 'pontual') | list | length }}</strong>
+        </div>
+        <div>
+          <span>Contatos</span>
+          <strong>{{ contatos | length }}</strong>
+        </div>
+        <div>
+          <span>NFs</span>
+          <strong>{{ nfs | length }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="card daily-summary">
+      <h2>📅 Resumo do dia</h2>
+      <div class="stats small-stats">
+        <div>
+          <span>Empresas hoje</span>
+          <strong>{{ resumo_dia.empresas }}</strong>
+        </div>
+        <div>
+          <span>Contatos hoje</span>
+          <strong>{{ resumo_dia.contatos }}</strong>
+        </div>
+        <div>
+          <span>Contratos hoje</span>
+          <strong>{{ resumo_dia.contratos }}</strong>
+        </div>
+        <div>
+          <span>NFs hoje</span>
+          <strong>{{ resumo_dia.nfs }}</strong>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="filter-content" id="content-fixo">
+    <section class="card">
+      <h2>📋 Contratos Fixos</h2>
+      {% set contratos_fixos = contratos | selectattr('categoria', 'equalto', 'fixo') | list %}
+      {% if contratos_fixos %}
+        <div class="contract-list">
+          {% for contrato in contratos_fixos %}
+            <div class="contract-item">
+              <strong>{{ contrato.descricao }}</strong>
+              <p>Empresa: {{ empresas | selectattr('id', 'equalto', contrato.empresa_id) | map(attribute='nome') | first }}</p>
+              <p>Status: <span class="badge">{{ contrato.status }}</span></p>
+              <p>Valor: R$ {{ "%.2f"|format(contrato.valor_atual) }}</p>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p style="text-align: center; color: var(--muted); padding: 20px;">Nenhum contrato fixo cadastrado</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="filter-content" id="content-pontual">
+    <section class="card">
+      <h2>⚡ Serviços Pontuais</h2>
+      {% set contratos_pontuais = contratos | selectattr('categoria', 'equalto', 'pontual') | list %}
+      {% if contratos_pontuais %}
+        <div class="contract-list">
+          {% for contrato in contratos_pontuais %}
+            <div class="contract-item">
+              <strong>{{ contrato.descricao }}</strong>
+              <p>Empresa: {{ empresas | selectattr('id', 'equalto', contrato.empresa_id) | map(attribute='nome') | first }}</p>
+              <p>Status: <span class="badge">{{ contrato.status }}</span></p>
+              <p>Valor: R$ {{ "%.2f"|format(contrato.valor_atual) }}</p>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p style="text-align: center; color: var(--muted); padding: 20px;">Nenhum serviço pontual cadastrado</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="filter-content" id="content-relatorio">
+    <section class="card">
+      <h2>📄 Relatórios</h2>
+      {% if nfs %}
+        <div style="text-align: center; padding: 20px;">
+          <p>Total de NFs registradas: <strong>{{ nfs | length }}</strong></p>
+          <a href="/relatorio" class="btn-relatorio">🔍 Visualizar Relatório Completo</a>
+        </div>
+      {% else %}
+        <p style="text-align: center; color: var(--muted); padding: 20px;">Nenhum relatório disponível ainda</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="cadastro-shell card">
+    <h2>➕ Cadastros</h2>
+
+    <div style="margin-bottom: 18px; text-align: right;">
+      <a href="/nfs/upload-page" class="btn-relatorio">📦 Cadastro de NF por upload</a>
+    </div>
+
+    <div class="cadastro-subnav" aria-label="Cadastro por tipo">
+      <button type="button" class="cadastro-subbtn active" data-cadastro="empresa">🏢 Empresa</button>
+      <button type="button" class="cadastro-subbtn" data-cadastro="contato">👤 Contato</button>
+      <button type="button" class="cadastro-subbtn" data-cadastro="contrato">📄 Contrato</button>
+      <button type="button" class="cadastro-subbtn" data-cadastro="nf">📦 NF</button>
+    </div>
+
+    <div class="cadastro-form-panel active" id="cadastro-panel-empresa">
+      <section class="card sub-card">
+        <h2>📋 Cadastro de Empresa</h2>
+        <form method="post" action="/empresas">
+          <label>Nome
+            <input type="text" name="nome" required />
+          </label>
+          <label>CNPJ
+            <input type="text" name="cnpj" inputmode="numeric" maxlength="18" pattern="\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}" placeholder="00.000.000/0000-00" required />
+          </label>
+          <label>Tipo
+            <input type="text" name="tipo" placeholder="Cliente, fornecedor, prestador" />
+          </label>
+          <label>Status
+            <select name="status">
+              <option value="ativo">Ativo</option>
+              <option value="inativo">Inativo</option>
+            </select>
+          </label>
+          <label>Observações
+            <textarea name="observacoes"></textarea>
+          </label>
+          <button type="submit">Salvar empresa</button>
+        </form>
+      </section>
+    </div>
+
+    <div class="cadastro-form-panel" id="cadastro-panel-contato">
+      <section class="card sub-card">
+        <h2>👤 Cadastro de Contato</h2>
+        <form method="post" action="/contatos">
+          <label>Empresa existente
+            <select name="empresa_id">
+              <option value="">-- selecionar ou criar automaticamente --</option>
+              {% for empresa in empresas %}
+                <option value="{{ empresa.id }}">{{ empresa.nome }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Nova empresa (opcional)
+            <input type="text" name="empresa_nome" placeholder="Digite o nome da empresa para criar automaticamente" />
+          </label>
+          <label>Nome do contato
+            <input type="text" name="nome" required />
+          </label>
+          <label>Cargo
+            <input type="text" name="cargo" />
+          </label>
+          <label>E-mail
+            <input type="email" name="email" />
+          </label>
+          <label>Telefone
+            <input type="text" name="telefone" />
+          </label>
+          <label>Observações
+            <textarea name="observacoes"></textarea>
+          </label>
+          <button type="submit">Salvar contato</button>
+        </form>
+      </section>
+    </div>
+
+    <div class="cadastro-form-panel" id="cadastro-panel-contrato">
+      <section class="card sub-card">
+        <h2>📄 Cadastro de Contrato</h2>
+        <form method="post" action="/contratos">
+          <label>Empresa existente
+            <select name="empresa_id">
+              <option value="">-- selecionar ou criar automaticamente --</option>
+              {% for empresa in empresas %}
+                <option value="{{ empresa.id }}">{{ empresa.nome }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Nova empresa (opcional)
+            <input type="text" name="empresa_nome" placeholder="Digite o nome da empresa para criar automaticamente" />
+          </label>
+          <label>Categoria
+            <select name="categoria" id="categoria-contrato">
+              <option value="fixo">Contrato fixo</option>
+              <option value="pontual">Serviço pontual</option>
+            </select>
+          </label>
+          <label>Tipo do serviço
+            <input type="text" name="tipo_servico" />
+          </label>
+          <div class="contract-fields" id="campos-contrato-fixo">
+            <label>Data de assinatura
+              <input type="text" name="data_assinatura" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" />
+            </label>
+            <label>Vigência
+              <input type="text" name="vigencia" placeholder="Opcional para serviço pontual" />
+            </label>
+            <label>Renovação
+              <input type="text" name="renovacao" placeholder="Opcional para serviço pontual" />
+            </label>
+          </div>
+          <label>Valor atual
+            <input type="number" step="0.01" name="valor_atual" />
+          </label>
+          <label>Responsável
+            <input type="text" name="responsavel" />
+          </label>
+          <label>Status
+            <select name="status">
+              <option value="ativo">Ativo</option>
+              <option value="cancelado">Cancelado</option>
+            </select>
+          </label>
+          <label>Observações
+            <textarea name="observacoes"></textarea>
+          </label>
+          <button type="submit">Salvar contrato</button>
+        </form>
+      </section>
+    </div>
+
+    <div class="cadastro-form-panel" id="cadastro-panel-nf">
+      <section class="card sub-card">
+        <h2>📦 Cadastro de NF</h2>
+        <form method="post" action="/nfs" enctype="multipart/form-data">
+          <label>Empresa da NF
+            <input type="text" name="empresa_nome" placeholder="Nome da empresa ou deixe em branco para usar o contrato existente" />
+          </label>
+          <label>Contrato existente
+            <select name="contrato_id">
+              <option value="" selected>Selecione um contrato existente</option>
+              {% for contrato in contratos %}
+                <option value="{{ contrato.id }}">{{ contrato.descricao }} ({{ contrato.categoria }})</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Categoria do contrato
+            <select name="categoria">
+              <option value="" selected>Selecione a categoria</option>
+              <option value="fixo">Fixo</option>
+              <option value="pontual">Pontual</option>
+            </select>
+          </label>
+          <label>Tipo de serviço
+            <input type="text" name="tipo_servico" placeholder="Ex.: Manutenção, limpeza, TI" />
+          </label>
+          <label>Descrição do contrato
+            <input type="text" name="descricao_contrato" placeholder="Descrição do contrato automático" />
+          </label>
+          <label>Arquivo da NF (opcional)
+            <input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.txt" />
+          </label>
+          <label>Razão NF
+            <input type="text" name="razao_nf" />
+          </label>
+          <label>Data NF
+            <input type="text" name="data_nf" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" />
+          </label>
+          <label>Nº NF
+            <input type="text" name="numero_nf" />
+          </label>
+          <label>Valor NF
+            <input type="number" step="0.01" name="valor_nf" />
+          </label>
+          <label>Data de pagamento
+            <input type="text" name="data_pagamento" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" />
+          </label>
+          <label>Forma de pagamento
+            <input type="text" name="forma_pagamento" />
+          </label>
+          <label>Status de conferência
+            <select name="status_conferencia">
+              <option value="pendente">Pendente</option>
+              <option value="confirmada">Confirmada</option>
+              <option value="rejeitada">Rejeitada</option>
+            </select>
+          </label>
+          <label>Descrição do item
+            <textarea name="descricao_item"></textarea>
+          </label>
+          <label>Observações
+            <textarea name="observacoes"></textarea>
+          </label>
+          <button type="submit">Salvar NF</button>
+        </form>
+      </section>
+    </div>
+  </section>
+</section>
+
+<script>
+  const categoriaContrato = document.getElementById('categoria-contrato');
+  const camposContratoFixo = document.getElementById('campos-contrato-fixo');
+  const cnpjInput = document.querySelector('input[name="cnpj"]');
+  const dateInputs = document.querySelectorAll('input[name="data_assinatura"], input[name="data_nf"], input[name="data_pagamento"]');
+  const nfFileInput = document.querySelector('input[name="file"]');
+
+  function parsearNomeArquivoNF(fileName = '') {
+    if (!fileName) return {};
+
+    const nome = fileName.replace(/\.[^.]+$/, '').trim();
+    const dados = {};
+
+    const numeroMatch = nome.match(/(?:NF|NFE|NOTA|FATURA)[\s_-]*?(\d{1,12})/i);
+    if (numeroMatch) {
+      dados.numero = numeroMatch[1];
+    }
+
+    const valorMatch = nome.match(/(\d+(?:[.,]\d{2}))/);
+    if (valorMatch) {
+      dados.valor = valorMatch[1].replace('.', '').replace(',', '.');
+    }
+
+    const dataMatch = nome.match(/(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})/);
+    if (dataMatch) {
+      const raw = dataMatch[1];
+      if (raw.includes('-')) {
+        const [ano, mes, dia] = raw.split('-');
+        dados.data = `${dia}/${mes}/${ano}`;
+      } else {
+        const [dia, mes, ano] = raw.split(/[\/]/);
+        dados.data = `${dia}/${mes}/${ano}`;
+      }
+    }
+
+    const empresaMatch = nome.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .&'-]{2,60}?)(?:\s+(?:NF|NFE|NOTA|FATURA|N°|SÉRIE|SERIE))/i);
+    if (empresaMatch) {
+      dados.empresa = empresaMatch[1].trim();
+    }
+
+    return dados;
+  }
+
+  function aplicarMascaraData(value) {
+    const digits = (value || '').replace(/\D/g, '').slice(0, 8);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
+  dateInputs.forEach((input) => {
+    input.setAttribute('placeholder', 'dd/mm/aaaa');
+    input.value = aplicarMascaraData(input.value);
+    input.addEventListener('input', () => {
+      input.value = aplicarMascaraData(input.value);
+    });
+  });
+
+  if (nfFileInput) {
+    nfFileInput.addEventListener('change', () => {
+      const fileName = nfFileInput.files?.[0]?.name || '';
+      const dados = parsearNomeArquivoNF(fileName);
+
+      if (dados.numero) {
+        const numeroInput = document.querySelector('input[name="numero_nf"]');
+        if (numeroInput) numeroInput.value = dados.numero;
+      }
+
+      if (dados.data) {
+        const dataInput = document.querySelector('input[name="data_nf"]');
+        if (dataInput) dataInput.value = dados.data;
+      }
+
+      if (dados.valor) {
+        const valorInput = document.querySelector('input[name="valor_nf"]');
+        if (valorInput) valorInput.value = Number(dados.valor).toFixed(2);
+      }
+
+      if (dados.empresa) {
+        const empresaInput = document.querySelector('input[name="empresa_nome"]');
+        if (empresaInput) empresaInput.value = dados.empresa;
+      }
+    });
+  }
+
+  function formatarCnpj(value) {
+    const digits = (value || '').replace(/\D/g, '').slice(0, 14);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+    if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+    if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+    return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+  }
+
+  if (cnpjInput) {
+    cnpjInput.addEventListener('input', () => {
+      cnpjInput.value = formatarCnpj(cnpjInput.value);
+    });
+  }
+
+  function atualizarCamposContrato() {
+    const categoria = categoriaContrato?.value;
+    if (!camposContratoFixo) return;
+
+    if (categoria === 'pontual') {
+      camposContratoFixo.style.display = 'none';
+    } else {
+      camposContratoFixo.style.display = 'block';
+    }
+  }
+
+  categoriaContrato?.addEventListener('change', atualizarCamposContrato);
+  atualizarCamposContrato();
+
+  // Filtros Rápidos
+  const filterButtons = document.querySelectorAll('.filter-btn');
+  const filterContents = document.querySelectorAll('.filter-content');
+
+  filterButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const filter = button.dataset.filter;
+
+      filterButtons.forEach((btn) => btn.classList.remove('active'));
+      button.classList.add('active');
+
+      filterContents.forEach((content) => content.classList.remove('active'));
+      const activeContent = document.getElementById(`content-${filter}`);
+      if (activeContent) {
+        activeContent.classList.add('active');
+      }
+    });
+  });
+
+  const cadastroButtons = document.querySelectorAll('.cadastro-subbtn');
+  const cadastroPanels = document.querySelectorAll('.cadastro-form-panel');
+
+  cadastroButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = button.dataset.cadastro;
+
+      cadastroButtons.forEach((btn) => btn.classList.toggle('active', btn === button));
+      cadastroPanels.forEach((panel) => {
+        const isActive = panel.id === `cadastro-panel-${target}`;
+        panel.classList.toggle('active', isActive);
+      });
+    });
+  });
+</script>
+{% endblock %}

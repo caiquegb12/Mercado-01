@@ -1,0 +1,18 @@
+mercado-central-nf/
+├── backend/
+│   ├── app.py                 # API principal (Flask/FastAPI)
+│   ├── nf_processor.py        # Lógica de processamento de NFs
+│   ├── database.py            # Conexão com banco de dados
+│   ├── models.py              # Modelos de dados
+│   └── requirements.txt       # Dependências do Python
+├── frontend/
+│   ├── index.html             # Tela principal
+│   ├── dashboard.html         # Dashboard
+│   ├── style.css              # Estilos
+│   └── script.js              # Lógica do frontend
+├── uploads/                   # Pasta para arquivos enviados
+│   ├── nfs/
+│   └── contratos/
+├── dados/                     # Dados de exemplo
+│   └── nfs_exemplo.xml
+└── README.md

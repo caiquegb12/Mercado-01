@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Relatório de conferência{% endblock %}
+
+{% block content %}
+<section class="report-shell">
+  <div class="report-topbar">
+    <div>
+      <span class="eyebrow">Relatório de conferência</span>
+      <h2>{{ titulo or 'Notas fiscais e contratos' }}</h2>
+    </div>
+
+    <div class="report-actions no-print">
+      {% if categoria == 'todos' %}
+        <a class="btn-primary" href="/relatorio/excel">📊 Exportar Excel</a>
+      {% endif %}
+      <div class="print-inline-block">
+        <button type="button" class="btn-secondary" id="print-pdf-button">🖨️ Imprimir PDF</button>
+        <label class="print-inline-label">
+          <span>Relatório:</span>
+          <select name="print-category" id="print-category">
+            <option value="todos">Todos</option>
+            <option value="fixo">Fixos</option>
+            <option value="pontual">Pontuais</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  {% if categoria == 'todos' %}
+    <nav class="report-tabs no-print" aria-label="Relatórios por categoria">
+      <a href="/relatorio" class="report-tab {% if categoria == 'todos' %}active{% endif %}">Geral</a>
+      <a href="/relatorio/fixo" class="report-tab {% if categoria == 'fixo' %}active{% endif %}">Fixos</a>
+      <a href="/relatorio/pontual" class="report-tab {% if categoria == 'pontual' %}active{% endif %}">Pontuais</a>
+    </nav>
+  {% endif %}
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const printSelect = document.getElementById('print-category');
+      const printPdfButton = document.getElementById('print-pdf-button');
+
+      if (printSelect && printPdfButton) {
+        const currentCategory = '{{ categoria or "todos" }}';
+        printSelect.value = currentCategory;
+
+        const printSelectedCategory = () => {
+          const category = printSelect.value;
+          const url = category === 'todos' ? '/relatorio' : `/relatorio/${category}`;
+          const currentPath = window.location.pathname;
+
+          if (currentPath !== url) {
+            window.location.href = url;
+            setTimeout(() => window.print(), 300);
+            return;
+          }
+
+          window.print();
+        };
+
+        printPdfButton.addEventListener('click', printSelectedCategory);
+        printSelect.addEventListener('change', printSelectedCategory);
+      }
+    });
+  </script>
+
+  <div class="alert-list no-print">
+    {% if alertas %}
+      {% for alerta in alertas %}
+        <div class="alert-card alert-{{ alerta.nivel }}">
+          <strong>{{ alerta.nf.numero_nf or 'NF sem número' }}</strong>
+          <span>Próximo do vencimento: {{ alerta.dias_restantes }} dias</span>
+          <small>{{ alerta.nf.contrato.descricao if alerta.nf.contrato else 'Contrato não vinculado' }}</small>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="alert-card alert-neutral">
+        Nenhuma NF próxima do vencimento nos próximos 30 dias.
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="report-summary no-print">
+    <div class="summary-card">
+      <span>Total de NFs</span>
+      <strong>{{ nfs|length }}</strong>
+    </div>
+    <div class="summary-card summary-card-highlight">
+      <span>Valor total</span>
+      <strong>R$ {{ format_currency_br(nfs|sum(attribute='valor_nf') if nfs else 0) }}</strong>
+    </div>
+    <div class="summary-card">
+      <span>Pagas</span>
+      <strong>{{ status_totals.pagas if status_totals else 0 }}</strong>
+    </div>
+    <div class="summary-card">
+      <span>Pendentes</span>
+      <strong>{{ status_totals.pendentes if status_totals else 0 }}</strong>
+    </div>
+    <div class="summary-card">
+      <span>Vencidas</span>
+      <strong>{{ status_totals.vencidas if status_totals else 0 }}</strong>
+    </div>
+  </div>
+
+  <div class="report-section-grid no-print">
+    <section class="report-mini-card">
+      <h3>Fixos</h3>
+      <strong>{{ fixos|length }}</strong>
+      <small>Pagas fixas: {{ status_fixos.pagas if status_fixos else 0 }}</small>
+      <small>Pendentes fixas: {{ status_fixos.pendentes if status_fixos else 0 }}</small>
+      <small>Vencidas fixas: {{ status_fixos.vencidas if status_fixos else 0 }}</small>
+      <a href="/relatorio/fixo">Ver relatório fixo</a>
+    </section>
+    <section class="report-mini-card">
+      <h3>Pontuais</h3>
+      <strong>{{ pontuais|length }}</strong>
+      <small>Pagas pontuais: {{ status_pontuais.pagas if status_pontuais else 0 }}</small>
+      <small>Pendentes pontuais: {{ status_pontuais.pendentes if status_pontuais else 0 }}</small>
+      <small>Vencidas pontuais: {{ status_pontuais.vencidas if status_pontuais else 0 }}</small>
+      <a href="/relatorio/pontual">Ver relatório pontual</a>
+    </section>
+    <section class="report-mini-card">
+      <h3>Consolidado</h3>
+      <strong>{{ nfs|length }}</strong>
+      <small>Pagas gerais: {{ status_totals.pagas if status_totals else 0 }}</small>
+      <small>Pendentes gerais: {{ status_totals.pendentes if status_totals else 0 }}</small>
+      <small>Vencidas gerais: {{ status_totals.vencidas if status_totals else 0 }}</small>
+      <a href="/relatorio">Ver relatório geral</a>
+    </section>
+  </div>
+
+  <div class="table-wrap">
+    <table class="report-table">
+      <thead>
+        <tr>
+          <th>Contrato</th>
+          <th>Categoria</th>
+          <th>Razão NF</th>
+          <th>Data NF</th>
+          <th>Nº NF</th>
+          <th>Valor</th>
+          <th>Pagamento</th>
+          <th>Status</th>
+          <th>Anexos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for nf in nfs %}
+        <tr>
+          <td>{{ nf.contrato.descricao if nf.contrato else 'Contrato não vinculado' }}</td>
+          <td>{{ nf.contrato.categoria if nf.contrato else 'sem contrato' }}</td>
+          <td>{{ nf.razao_nf or '-' }}</td>
+          <td>{{ nf.data_nf.strftime('%d/%m/%Y') if nf.data_nf else '-' }}</td>
+          <td>{{ nf.numero_nf or '-' }}</td>
+          <td class="money">R$ {{ format_currency_br(nf.valor_nf or 0) }}</td>
+          <td>{{ nf.data_pagamento.strftime('%d/%m/%Y') if nf.data_pagamento else '-' }}</td>
+          <td>
+            <span class="status-badge status-{{ (nf.status_conferencia or 'pendente')|lower|replace(' ', '-') }}">
+              {{ nf.status_conferencia or 'Pendente' }}
+            </span>
+          </td>
+          <td class="attachment-cell">
+            {% if nf.anexos %}
+              {% for anexo in nf.anexos %}
+                <a href="/anexos/{{ anexo.id }}" class="download-link no-print" target="_blank">{{ anexo.arquivo_nome }}</a>
+              {% endfor %}
+            {% endif %}
+            <form method="post" action="/anexos" enctype="multipart/form-data" class="upload-form no-print">
+              <input type="hidden" name="empresa_id" value="{{ nf.contrato.empresa_id if nf.contrato else 0 }}" />
+              <input type="hidden" name="contrato_id" value="{{ nf.contrato.id if nf.contrato else 0 }}" />
+              <input type="hidden" name="nf_id" value="{{ nf.id }}" />
+              <input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx" />
+              <button type="submit">Upload</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
