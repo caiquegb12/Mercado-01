@@ -11,6 +11,9 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
 from openpyxl import Workbook
+from PIL import Image, ImageOps
+import pytesseract
+import pypdfium2
 
 from app.database import SessionLocal, Empresa, Contato, Contrato, NF, Anexo
 
@@ -91,13 +94,60 @@ def parse_money_to_float(value):
     if not text:
         return 0.0
 
-    normalized = text.replace("R$", "").replace(" ", "")
-    normalized = normalized.replace(".", "").replace(",", ".")
+    normalized = text.replace("R$", "").replace(" ", "").replace("_", "")
+
+    if "," in normalized and "." in normalized:
+        if normalized.rfind(",") > normalized.rfind("."):
+            normalized = normalized.replace(".", "").replace(",", ".")
+        else:
+            normalized = normalized.replace(",", "")
+    elif "," in normalized:
+        normalized = normalized.replace(".", "").replace(",", ".")
+    elif "." in normalized:
+        if not re.search(r"\.\d{1,2}$", normalized):
+            normalized = normalized.replace(".", "")
 
     try:
         return float(Decimal(normalized))
     except (InvalidOperation, ValueError):
         return 0.0
+
+
+def ocr_image_bytes(image_bytes: bytes) -> str:
+    if not image_bytes:
+        return ""
+
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image = ImageOps.grayscale(image)
+        image = ImageOps.autocontrast(image)
+        text = pytesseract.image_to_string(image, config="--psm 6 --oem 3") or ""
+        return text.strip()
+    except Exception:
+        return ""
+
+
+def extract_scanned_pdf_text(pdf_bytes: bytes) -> str:
+    if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
+        return ""
+
+    try:
+        pdf = pypdfium2.PdfDocument(io.BytesIO(pdf_bytes))
+        pages_text = []
+        for page_index in range(len(pdf)):
+            page = pdf[page_index]
+            image = page.render(scale=2).to_pil()
+            text = pytesseract.image_to_string(
+                image,
+                config="--psm 6 --oem 3",
+            ) or ""
+            if text.strip():
+                pages_text.append(text.strip())
+        return "\n".join(pages_text)
+    except Exception:
+        return ""
 
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
@@ -122,6 +172,13 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
         except Exception:
             pass
 
+        scanned_text = extract_scanned_pdf_text(pdf_bytes)
+        if scanned_text.strip():
+            return scanned_text
+
+    if pdf_bytes.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"\x42\x4d")):
+        return ocr_image_bytes(pdf_bytes)
+
     for encoding in ("utf-8", "latin-1"):
         try:
             text = pdf_bytes.decode(encoding)
@@ -130,7 +187,7 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
         if text.strip():
             return text
 
-    return ""
+    return ocr_image_bytes(pdf_bytes)
 
 
 def parse_invoice_from_text(text: str, filename: str = "") -> dict:
@@ -146,56 +203,123 @@ def parse_invoice_from_text(text: str, filename: str = "") -> dict:
         "razao_nf": "",
     }
 
-    cleaned_lines = [line.strip() for line in re.split(r"[\n\r]+", full_text) if line.strip()]
-    candidate_lines = []
-    for line in cleaned_lines:
-        repair_line = line.replace("�\x89", "é").replace("\x89", "é").replace("\x80", "")
-        if len(repair_line) < 6:
-            continue
-        if re.search(r"(?:NF|NFE|NOTA|FATURA|DANFE|CNPJ|IE|CHAVE|SÉRIE|SERIE|TOTAL|VALOR|PAGAMENTO|EMISS|DATA|R\$)", repair_line, flags=re.I):
-            continue
-        if re.search(r"[A-Za-zÀ-ÿ]", repair_line) and not re.search(r"\d", repair_line):
-            candidate_lines.append(repair_line)
+    def normalize_company_name(value: str) -> str:
+        cleaned = (value or "").strip()
+        cleaned = cleaned.replace("\u200b", "").replace("\x00", "")
+        cleaned = re.sub(r"^(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|NATUREZA\s+DA\s+OPERA[ÇC]AO|NATUREZA|OPERACAO|NOME\s+FANTASIA|NOME|EMPRESA)\s*[:\-]?\s*", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
 
-    if candidate_lines:
-        result["empresa_nome"] = max(candidate_lines, key=len).strip(" -_")
+        if re.search(r"^(?:COMPRA|VENDA|MERCADORIA|SERVI[ÇC]O|SERVICO|OPERA[ÇC]AO|NATUREZA|TOTAL|VALOR|DATA|NF|NOTA)", cleaned, flags=re.I):
+            return ""
+        return cleaned
+
+    explicit_company_patterns = [
+        r"(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|DENOMINA[ÇC]A[O0]\s+SOCIAL|NOME\s+FANTASIA|EMPRESA)\s*[:\-]?\s*([A-Za-zÀ-ÿ0-9 .&/()\-]+)",
+    ]
+    for pattern in explicit_company_patterns:
+        match = re.search(pattern, full_text, flags=re.I)
+        if match:
+            candidate_company = normalize_company_name(match.group(1))
+            if candidate_company:
+                result["empresa_nome"] = candidate_company
+                break
+
+    cleaned_lines = [line.strip() for line in re.split(r"[\n\r]+", full_text) if line.strip()]
+    if not result["empresa_nome"]:
+        candidate_lines = []
+        for line in cleaned_lines:
+            repair_line = line.replace("�\x89", "é").replace("\x89", "é").replace("\x80", "")
+            repair_line = normalize_company_name(repair_line)
+            if not repair_line or len(repair_line) < 6:
+                continue
+            if re.search(r"(?:NF|NFE|NOTA|FATURA|DANFE|CNPJ|IE|CHAVE|SÉRIE|SERIE|TOTAL|VALOR|PAGAMENTO|EMISS|DATA|R\$|COMPRA|VENDA|MERCADORIA|SERVI[ÇC]O|SERVICO|OPERA[ÇC]AO|NATUREZA)", repair_line, flags=re.I):
+                continue
+            if re.search(r"[A-Za-zÀ-ÿ]", repair_line) and not re.search(r"\d", repair_line):
+                candidate_lines.append(repair_line)
+
+        if candidate_lines:
+            result["empresa_nome"] = normalize_company_name(max(candidate_lines, key=len))
 
     file_name = Path(filename or "").stem or ""
     if file_name:
         match = re.search(r"(?i)([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .&-]{4,80})(?:\s+(?:NF|NFE|NOTA|FATURA)[-\s]?[A-Z0-9/.-]+)", file_name)
         if match and not result["empresa_nome"]:
-            result["empresa_nome"] = match.group(1).strip(" -_")
+            result["empresa_nome"] = normalize_company_name(match.group(1))
+
+    def normalize_nf_number(raw_value: str) -> str:
+        digits = re.sub(r"\D", "", str(raw_value or ""))
+        if not digits or set(digits) == {"0"}:
+            return ""
+        return digits.lstrip("0") or "0"
 
     numero_patterns = [
-        r"(?:NF(?:[- ]?E)?|NFE|NOTA FISCAL|N[º°])\s*[:\-]*\s*[Nº°]?\s*([0-9]{1,12})",
-        r"(?:N[º°]|NÚMERO|NUMERO)[\s:]*([0-9]{1,12})",
-        r"(?:N[º°]|N°)\s*([0-9]{1,12})",
-        r"(?:NF|NOTA FISCAL|N[º°])[^\d]{0,15}([0-9]{1,12})",
+        r"(?:NF(?:[- ]?E)?|NFE|NOTA\s*FISCAL|N[º°]|NÚMERO|NUMERO)\s*[:\-]*\s*(?:N[º°]\s*)?([0-9]{1,12})",
+        r"(?:NF(?:[- ]?E)?|NFE|NOTA\s*FISCAL|N[º°]|NÚMERO|NUMERO)[^\d]{0,15}([0-9]{1,12})",
     ]
     for pattern in numero_patterns:
         numero_match = re.search(pattern, full_text, flags=re.I)
         if numero_match:
-            result["numero_nf"] = numero_match.group(1).strip(" -_")
-            break
+            candidate_number = normalize_nf_number(numero_match.group(1))
+            if candidate_number:
+                result["numero_nf"] = candidate_number
+                break
+
+    if not result["numero_nf"]:
+        for line in re.split(r"[\n\r]+", full_text):
+            if re.search(r"(?:NF|NFE|NOTA FISCAL|N[º°]|NÚMERO|NUMERO)", line, flags=re.I):
+                numbers = re.findall(r"\d{3,12}", line)
+                for number in numbers:
+                    candidate_number = normalize_nf_number(number)
+                    if candidate_number:
+                        result["numero_nf"] = candidate_number
+                        break
+                if result["numero_nf"]:
+                    break
 
     if not result["numero_nf"]:
         for pattern in numero_patterns:
             filename_match = re.search(pattern, file_name, flags=re.I)
             if filename_match:
-                result["numero_nf"] = filename_match.group(1).strip(" -_")
+                candidate_number = normalize_nf_number(filename_match.group(1))
+                if candidate_number:
+                    result["numero_nf"] = candidate_number
+                    break
+
+    final_total_pattern = r"(?:valor\s*(?:total|liquido)(?!\s+dos\s+produtos\b)(?:\s*(?:da\s*)?(?:nota|nf)|\s*da\s*nota)|total\s*(?:da\s*)?(?:nota|nf)|total\s*geral)"
+    product_total_pattern = r"(?:valor\s*(?:total|liquido)\s*(?:dos\s*produtos|de\s*produtos)|total\s*(?:dos\s*produtos|de\s*produtos)|valor\s*dos\s*produtos|subtotal)"
+
+    explicit_total_match = None
+    for line in re.split(r"[\n\r]+", full_text):
+        normalized_line = line.strip()
+        if not normalized_line:
+            continue
+
+        if re.search(final_total_pattern, normalized_line, flags=re.I):
+            amount_match = re.search(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", normalized_line, flags=re.I)
+            if amount_match:
+                explicit_total_match = amount_match
                 break
 
-    total_match = re.search(
-        r"(?:valor\s*(?:total|liquido)|total\s*(?:da\s*)?(?:nota|nf)|total\s*geral)[^\n]{0,40}R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))",
-        full_text,
-        flags=re.I,
-    )
-    if total_match:
-        result["valor_nf"] = parse_money_to_float(total_match.group(1))
+    if explicit_total_match:
+        result["valor_nf"] = parse_money_to_float(explicit_total_match.group(1))
     else:
-        money_values = re.findall(r"R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", full_text, flags=re.I)
-        if money_values:
-            result["valor_nf"] = max(parse_money_to_float(value) for value in money_values)
+        product_total_match = None
+        for line in re.split(r"[\n\r]+", full_text):
+            normalized_line = line.strip()
+            if not normalized_line:
+                continue
+            if re.search(product_total_pattern, normalized_line, flags=re.I):
+                amount_match = re.search(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", normalized_line, flags=re.I)
+                if amount_match:
+                    product_total_match = amount_match
+                    break
+
+        if product_total_match:
+            result["valor_nf"] = parse_money_to_float(product_total_match.group(1))
+        else:
+            money_values = re.findall(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", full_text, flags=re.I)
+            if money_values:
+                result["valor_nf"] = parse_money_to_float(money_values[-1])
 
     if result["valor_nf"] == 0:
         filename_value_match = re.search(r"(\d+(?:[.,]\d{2}))", file_name)
@@ -215,7 +339,8 @@ def parse_invoice_from_text(text: str, filename: str = "") -> dict:
         if date_match:
             result["data_nf"] = date_match.group(1)
 
-    result["razao_nf"] = result["empresa_nome"]
+    result["empresa_nome"] = normalize_company_name(result["empresa_nome"])
+    result["razao_nf"] = normalize_company_name(result["empresa_nome"])
     return result
 
 
@@ -603,7 +728,7 @@ def add_nf(
 
         if empresa is None:
             db.close()
-            mensagem = "Selecione um contrato ou informe a empresa para criar automaticamente."
+            mensagem = "Informe a empresa para criar automaticamente o contrato da NF."
             return RedirectResponse(url=f"/?error={quote(mensagem)}", status_code=303)
 
         contrato = db.query(Contrato).filter(

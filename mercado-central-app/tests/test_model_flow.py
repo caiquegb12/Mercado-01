@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
@@ -211,6 +212,86 @@ class ModelFlowTest(unittest.TestCase):
         self.assertEqual(parsed["data_nf"], "24/12/2024")
         self.assertEqual(parsed["empresa_nome"], "PRINCIPAL VAREJO DE COSMÉTICOS")
 
+    def test_parse_invoice_uses_total_value_not_larger_item_value(self):
+        sample_text = """
+        NF-e N° 1065444
+        ITEM 1 R$ 500,00
+        ITEM 2 R$ 230,00
+        TOTAL DA NOTA R$ 67,90
+        """
+
+        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
+
+        self.assertEqual(parsed["valor_nf"], 67.9)
+
+    def test_parse_invoice_prefers_total_value_even_without_currency_symbol(self):
+        sample_text = """
+        NF-e N° 1065444
+        ITEM 1 R$ 500,00
+        ITEM 2 R$ 230,00
+        VALOR TOTAL DA NOTA 220,00
+        FRETE R$ 10,00
+        """
+
+        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
+
+        self.assertEqual(parsed["valor_nf"], 220.0)
+
+    def test_parse_invoice_prefers_note_total_over_product_total_line(self):
+        sample_text = """
+        NF-e N° 1065444
+        VALOR TOTAL DOS PRODUTOS: R$ 205,00
+        VALOR TOTAL DA NOTA: R$ 220,00
+        """
+
+        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
+
+        self.assertEqual(parsed["valor_nf"], 220.0)
+
+    def test_parse_invoice_does_not_treat_product_total_as_note_total(self):
+        sample_text = """
+        NF-e N° 1065444
+        VALOR TOTAL DOS PRODUTOS: R$ 20.500,00
+        VALOR TOTAL DA NOTA: R$ 220,00
+        """
+
+        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
+
+        self.assertEqual(parsed["valor_nf"], 220.0)
+
+    def test_parse_invoice_number_prefers_nf_label_over_total_line(self):
+        sample_text = """
+        VALOR TOTAL DA NOTA: R$ 220,00
+        NF-e N° 1065444
+        """
+
+        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
+
+        self.assertEqual(parsed["numero_nf"], "1065444")
+
+    def test_parse_invoice_number_removes_zero_padding(self):
+        sample_text = """
+        NF-e N° 000123
+        VALOR TOTAL DA NOTA: R$ 220,00
+        """
+
+        parsed = parse_invoice_from_text(sample_text, "nf-000123.pdf")
+
+        self.assertEqual(parsed["numero_nf"], "123")
+
+    def test_parse_invoice_from_text_strips_company_prefix_labels(self):
+        sample_text = """
+        NF-e N° 1065444
+        RAZÃO SOCIAL: ALFA TECNOLOGIA E COMÉRCIO LTDA.
+        NATUREZA DA OPERAÇÃO: COMPRA DE MERCADORIA
+        TOTAL DA NOTA R$ 67,90
+        """
+
+        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
+
+        self.assertEqual(parsed["empresa_nome"], "ALFA TECNOLOGIA E COMÉRCIO LTDA.")
+        self.assertEqual(parsed["razao_nf"], "ALFA TECNOLOGIA E COMÉRCIO LTDA.")
+
     def test_nf_preview_route_parses_uploaded_file(self):
         client = TestClient(app)
         client.post("/login", data={"username": "mercado", "password": "mercado123"})
@@ -219,6 +300,25 @@ class ModelFlowTest(unittest.TestCase):
         response = client.post(
             "/nfs/preview",
             files={"file": ("nf-1065444.txt", sample, "text/plain")},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["numero_nf"], "1065444")
+        self.assertEqual(payload["valor_nf"], 67.9)
+        self.assertEqual(payload["data_nf"], "24/12/2024")
+        self.assertEqual(payload["empresa_nome"], "PRINCIPAL VAREJO DE COSMÉTICOS")
+
+    @patch("app.main.pytesseract.image_to_string", return_value="NF-e N° 1065444\nDATA DE RECEBIMENTO 24/12/2024\nPRINCIPAL VAREJO DE COSMÉTICOS\nTOTAL DA NOTA: R$ 67,90\n")
+    def test_nf_preview_route_can_ocr_uploaded_image(self, mock_image_to_string):
+        client = TestClient(app)
+        client.post("/login", data={"username": "mercado", "password": "mercado123"})
+
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+        response = client.post(
+            "/nfs/preview",
+            files={"file": ("nf-1065444.png", png_bytes, "image/png")},
             follow_redirects=False,
         )
 
