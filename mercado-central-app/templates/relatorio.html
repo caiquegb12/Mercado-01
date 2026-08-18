@@ -11,9 +11,8 @@
     </div>
 
     <div class="report-actions no-print">
-      {% if categoria == 'todos' %}
-        <a class="btn-primary" href="/relatorio/excel">📊 Exportar Excel</a>
-      {% endif %}
+      {% set categoria_export = categoria if categoria in ['fixo', 'pontual'] else 'todos' %}
+      <a class="btn-primary" href="/relatorio/excel?categoria={{ categoria_export }}">📊 Exportar Excel</a>
       <div class="print-inline-block">
         <button type="button" class="btn-secondary" id="print-pdf-button">🖨️ Imprimir PDF</button>
         <label class="print-inline-label">

@@ -153,6 +153,65 @@ class ModelFlowTest(unittest.TestCase):
         self.assertIn("status-badge", response.text)
         self.assertIn("Exportar Excel", response.text)
 
+    def test_report_pages_keep_excel_export_for_filtered_categories(self):
+        empresa = Empresa(nome="Empresa Filtrada", cnpj="00.111.000/0001-99", tipo="Cliente")
+        self.db.add(empresa)
+        self.db.commit()
+
+        contrato_fixo = Contrato(
+            empresa_id=empresa.id,
+            descricao="Contrato fixo filtrado",
+            categoria="fixo",
+            tipo_servico="Manutenção",
+            valor_atual=500.0,
+            status="ativo",
+        )
+        self.db.add(contrato_fixo)
+
+        contrato_pontual = Contrato(
+            empresa_id=empresa.id,
+            descricao="Contrato pontual filtrado",
+            categoria="pontual",
+            tipo_servico="Instalação",
+            valor_atual=200.0,
+            status="ativo",
+        )
+        self.db.add(contrato_pontual)
+        self.db.commit()
+
+        self.db.add_all([
+            NF(
+                contrato_id=contrato_fixo.id,
+                razao_nf="Empresa Filtrada",
+                numero_nf="NF-FIXA",
+                valor_nf=500.0,
+                forma_pagamento="PIX",
+                status_conferencia="confirmada",
+            ),
+            NF(
+                contrato_id=contrato_pontual.id,
+                razao_nf="Empresa Filtrada",
+                numero_nf="NF-PONTUAL",
+                valor_nf=200.0,
+                forma_pagamento="PIX",
+                status_conferencia="pendente",
+            ),
+        ])
+        self.db.commit()
+
+        client = TestClient(app)
+        client.post("/login", data={"username": "mercado", "password": "mercado123"})
+
+        response_fixo = client.get("/relatorio/fixo")
+        self.assertEqual(response_fixo.status_code, 200)
+        self.assertIn("Exportar Excel", response_fixo.text)
+        self.assertIn("/relatorio/excel?categoria=fixo", response_fixo.text)
+
+        response_pontual = client.get("/relatorio/pontual")
+        self.assertEqual(response_pontual.status_code, 200)
+        self.assertIn("Exportar Excel", response_pontual.text)
+        self.assertIn("/relatorio/excel?categoria=pontual", response_pontual.text)
+
     def test_contact_creation_can_auto_create_company(self):
         client = TestClient(app)
         client.post("/login", data={"username": "mercado", "password": "mercado123"})

@@ -989,21 +989,86 @@ def download_anexo(anexo_id: int):
 
 
 @app.get("/relatorio/excel")
-def relatorio_excel(request: Request):
+def relatorio_excel(request: Request, categoria: str | None = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=307)
 
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+    categoria = (categoria or "").strip().lower()
+    if categoria in {"", "todos", "geral"}:
+        categoria = "geral"
+    elif categoria not in {"fixo", "pontual"}:
+        categoria = "geral"
+
+    db = SessionLocal()
+    empresas = {empresa.id: empresa for empresa in db.query(Empresa).all()}
+    contratos = db.query(Contrato).all()
+    db.close()
+
+    def get_last_nf_for_contrato(contrato_id: int):
+        db = SessionLocal()
+        nf = db.query(NF).filter(NF.contrato_id == contrato_id).order_by(NF.data_nf.desc().nullslast(), NF.id.desc()).first()
+        db.close()
+        return nf
+
+    def get_rows_for_category(category_name: str):
+        rows = []
+        for contrato in contratos:
+            if category_name == "geral":
+                pass
+            elif contrato.categoria != category_name:
+                continue
+
+            empresa = empresas.get(contrato.empresa_id)
+            nf = get_last_nf_for_contrato(contrato.id)
+            rows.append([
+                empresa.nome if empresa else "Empresa não vinculada",
+                contrato.descricao or "",
+                contrato.categoria or "",
+                contrato.tipo_servico or "",
+                contrato.data_assinatura.strftime("%d/%m/%Y") if contrato.data_assinatura else "",
+                contrato.vigencia or "",
+                float(contrato.valor_atual) if contrato.valor_atual is not None else 0,
+                contrato.responsavel or "",
+                contrato.status or "",
+                nf.numero_nf if nf else "",
+                nf.data_nf.strftime("%d/%m/%Y") if nf and nf.data_nf else "",
+                float(nf.valor_nf) if nf and nf.valor_nf is not None else 0,
+                nf.data_pagamento.strftime("%d/%m/%Y") if nf and nf.data_pagamento else "",
+                contrato.observacoes or "",
+            ])
+        return rows
+
     wb = Workbook()
     ws = wb.active
-    ws.title = "Relatorio"
+    ws.title = "Geral" if categoria == "geral" else ("Fixos" if categoria == "fixo" else "Pontuais")
+
+    headers = [
+        "Empresa",
+        "Contrato",
+        "Categoria",
+        "Tipo de serviço",
+        "Data de assinatura",
+        "Vigência",
+        "Valor atual",
+        "Responsável",
+        "Status",
+        "Última NF",
+        "Data NF",
+        "Valor NF",
+        "Data pagamento",
+        "Observações",
+    ]
+    ws.append(headers)
+
+    rows = get_rows_for_category(categoria if categoria in {"fixo", "pontual"} else "geral")
+    for row in rows:
+        ws.append(row)
 
     header_fill = PatternFill("solid", fgColor="8B1D1D")
     header_font = Font(color="FFFFFF", bold=True)
     thin = Side(style="thin", color="E7D4CF")
-
-    ws.append(["Contrato", "Categoria", "Razão NF", "Data NF", "Nº NF", "Valor", "Pagamento", "Status"])
 
     for cell in ws[1]:
         cell.fill = header_fill
@@ -1011,45 +1076,31 @@ def relatorio_excel(request: Request):
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    for nf in get_relatorio_data():
-        ws.append([
-            nf.contrato.descricao if nf.contrato else "Contrato não vinculado",
-            nf.contrato.categoria if nf.contrato else "sem contrato",
-            nf.razao_nf or "",
-            nf.data_nf.isoformat() if nf.data_nf else "",
-            nf.numero_nf or "",
-            round_money(nf.valor_nf or 0),
-            nf.forma_pagamento or "",
-            nf.status_conferencia or "",
-        ])
-
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=8):
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=14):
         for cell in row:
             cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
             cell.alignment = Alignment(vertical="center")
 
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=6, max_col=6):
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=7, max_col=7):
         for cell in row:
-            cell.number_format = "R$ #,##0.00"
+            cell.number_format = 'R$ #,##0.00'
 
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=8, max_col=8):
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=11, max_col=11):
         for cell in row:
-            status = (cell.value or "").lower()
-            if status == "confirmada":
-                cell.fill = PatternFill("solid", fgColor="D9F7E8")
-            elif status == "pendente":
-                cell.fill = PatternFill("solid", fgColor="FFF3D6")
-            elif status == "rejeitada":
-                cell.fill = PatternFill("solid", fgColor="FDE1E1")
+            if cell.value:
+                cell.number_format = 'dd/mm/yyyy'
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=13, max_col=13):
+        for cell in row:
+            if cell.value:
+                cell.number_format = 'dd/mm/yyyy'
 
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:H{ws.max_row}"
+    ws.auto_filter.ref = f"A1:N{ws.max_row}"
     ws.sheet_view.showGridLines = False
-
-    widths = [28, 18, 28, 14, 16, 16, 18, 18]
+    widths = [24, 28, 14, 18, 16, 16, 14, 18, 14, 20, 12, 14, 14, 30]
     for idx, width in enumerate(widths, start=1):
         ws.column_dimensions[chr(64 + idx)].width = width
-
     ws.print_title_rows = "1:1"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
@@ -1059,6 +1110,11 @@ def relatorio_excel(request: Request):
     wb.save(output)
     output.seek(0)
 
+    filename_mapping = {
+        "fixo": "relatorio_fixos_mercado_central.xlsx",
+        "pontual": "relatorio_pontuais_mercado_central.xlsx",
+        "geral": "relatorio_geral_mercado_central.xlsx",
+    }
     response = StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    response.headers["Content-Disposition"] = "attachment; filename=relatorio_mercado_central.xlsx"
+    response.headers["Content-Disposition"] = f"attachment; filename={filename_mapping[categoria]}"
     return response
