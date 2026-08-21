@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from app.database import SessionLocal, Empresa, Contato, Contrato, NF, Base, engine, seed_demo_data
-from app.main import app, parse_invoice_from_text
+from app.main import app
 
 
 class ModelFlowTest(unittest.TestCase):
@@ -82,26 +82,6 @@ class ModelFlowTest(unittest.TestCase):
         self.assertEqual(self.db.query(Contato).count(), 1)
         self.assertEqual(self.db.query(Contrato).count(), 1)
         self.assertEqual(self.db.query(NF).count(), 1)
-
-    def test_parse_invoice_from_text_keeps_company_name_when_status_is_same_line(self):
-        sample = (
-            "DANFSe v2.0\n"
-            "Documento Auxiliar da NFS-e\n"
-            "NÚMERO DA NFS-E\n"
-            "1969\n"
-            "COMPETÊNCIA DA NFS-E\n"
-            "03/08/2026\n"
-            "SITUAÇÃO DA NFS-E: EMITIDA PHD AMBIENTAL LTDA\n"
-            "VALOR LÍQUIDO NFS-e + IBS/CBS\n"
-            "R$ 3.524,29\n"
-        )
-
-        parsed = parse_invoice_from_text(sample, "danfse_status_accented.pdf")
-
-        self.assertEqual(parsed["numero_nf"], "1969")
-        self.assertEqual(parsed["data_nf"], "03/08/2026")
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
 
     def test_report_page_handles_orphan_nf_without_crashing(self):
         empresa = Empresa(nome="Empresa Teste", cnpj="00.000.000/0001-99", tipo="Cliente")
@@ -291,265 +271,6 @@ class ModelFlowTest(unittest.TestCase):
         self.assertEqual(parsed["data_nf"], "24/12/2024")
         self.assertEqual(parsed["empresa_nome"], "PRINCIPAL VAREJO DE COSMÉTICOS")
 
-    def test_parse_invoice_from_real_nfs_e_pdf_text(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        PRESTADOR / FORNECEDOR
-        NOME / NOME EMPRESARIAL
-        PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_31062002218053816000149000000000196926082644043565_01.pdf")
-
-        self.assertEqual(parsed["numero_nf"], "1969")
-        self.assertEqual(parsed["valor_nf"], 3524.29)
-        self.assertEqual(parsed["data_nf"], "03/08/2026")
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_keeps_company_name_and_legal_name_separate(self):
-        sample_text = """
-        DANFSe v2.0
-        NOME FANTASIA: REDE DE VAREJO LTDA
-        RAZÃO SOCIAL: PHD AMBIENTAL LTDA
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 1.250,00
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_31062002218053816000149000000000196926082644043565_01.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "REDE DE VAREJO LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_ignores_nfs_status_label_as_company_name(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        SITUAÇÃO DA NFS-E
-        EMITIDA
-        PRESTADOR / FORNECEDOR
-        NOME / NOME EMPRESARIAL
-        PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_status_emitida.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_ignores_status_label_and_colon_variant(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        SITUACAO DA NFS-E: EMITIDA
-        PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_status_colon.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_ignores_finalidade_label_and_keeps_company_name(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        SITUAÇÃO DA NFS-E
-        NFS-e Gerada
-        FINALIDADE
-        NFS-e regular
-        PRESTADOR / FORNECEDOR
-        NOME / NOME EMPRESARIAL
-        PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_finalidade.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_prefers_business_name_over_cnpj_in_real_pdf_text(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        Município: Belo Horizonte - MG
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        SITUAÇÃO DA NFS-E
-        NFS-e Gerada
-        FINALIDADE
-        NFS-e regular
-        PRESTADOR / FORNECEDOR
-        CNPJ / CPF / NIF
-        18.053.816/0001-49
-        NOME / NOME EMPRESARIAL
-        PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_31062002218053816000149000000000196926082644043565_01.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_ignores_accented_status_label_variant(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        SITUAÇÃO DA NFS-E: EMITIDA PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_status_accented.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_strips_status_label_from_same_line_company_name(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        SITUACAO DA NFS-E: EMITIDA PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_status_company_same_line.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_ignores_generic_danfe_filename_fallback(self):
-        filename = "danfe_310620022180538160014900000000019629082644043565_01.pdf"
-
-        parsed = parse_invoice_from_text("", filename)
-
-        self.assertEqual(parsed["numero_nf"], "")
-        self.assertEqual(parsed["valor_nf"], 0.0)
-
-    def test_parse_invoice_ignores_mercado_central_as_company_name(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        PRESTADOR / FORNECEDOR
-        NOME / NOME EMPRESARIAL
-        PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "mercado-central-2026.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_prefers_provider_name_over_municipality_name(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        PRESTADOR / FORNECEDOR
-        NOME / NOME EMPRESARIAL
-        PHD AMBIENTAL LTDA
-        MUNICÍPIO: JUNDIAÍ
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_31062002218053816000149000000000196926082644043565_01.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_ignores_indicator_municipal_label(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        INDICADOR MUNICIPAL (INSCRIÇÃO)
-        PHD AMBIENTAL LTDA
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_indicator_municipal.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
-    def test_parse_invoice_ignores_uf_suffix_after_city_name(self):
-        sample_text = """
-        DANFSe v2.0
-        Documento Auxiliar da NFS-e
-        NÚMERO DA NFS-E
-        1969
-        COMPETÊNCIA DA NFS-E
-        03/08/2026
-        PRESTADOR / FORNECEDOR
-        NOME / NOME EMPRESARIAL
-        PHD AMBIENTAL LTDA
-        MUNICÍPIO: JUNDIAÍ/SP
-        UF: SP
-        VALOR LÍQUIDO NFS-e + IBS/CBS
-        R$ 3.524,29
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "danfse_31062002218053816000149000000000196926082644043565_01.pdf")
-
-        self.assertEqual(parsed["empresa_nome"], "PHD AMBIENTAL LTDA")
-        self.assertEqual(parsed["razao_nf"], "PHD AMBIENTAL LTDA")
-
     def test_parse_invoice_uses_total_value_not_larger_item_value(self):
         sample_text = """
         NF-e N° 1065444
@@ -574,22 +295,6 @@ class ModelFlowTest(unittest.TestCase):
         parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
 
         self.assertEqual(parsed["valor_nf"], 220.0)
-
-    def test_parse_invoice_prefers_total_value_even_when_other_amounts_follow(self):
-        sample_text = """
-        NF-e N° 1065444
-        DATA DE EMISSAO 24/12/2024
-        PRINCIPAL VAREJO DE COSMÉTICOS
-        VALOR TOTAL 67,90
-        FRETE R$ 15,00
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
-
-        self.assertEqual(parsed["numero_nf"], "1065444")
-        self.assertEqual(parsed["valor_nf"], 67.9)
-        self.assertEqual(parsed["data_nf"], "24/12/2024")
-        self.assertEqual(parsed["empresa_nome"], "PRINCIPAL VAREJO DE COSMÉTICOS")
 
     def test_parse_invoice_prefers_note_total_over_product_total_line(self):
         sample_text = """
@@ -633,24 +338,6 @@ class ModelFlowTest(unittest.TestCase):
 
         self.assertEqual(parsed["numero_nf"], "123")
 
-    def test_parse_invoice_handles_mojibake_from_pdf_extraction(self):
-        sample_text = """
-        NF-e
-        NÂ° 1065444
-        SÃ©rie 1
-        DATA DE RECEBIMENTO: 24/12/2024
-        PRINCIPAL VAREJO DE COSMÃ©TICOS
-        TOTAL DA NOTA: R$ 67,90
-        """
-
-        parsed = parse_invoice_from_text(sample_text, "nf-1065444.pdf")
-
-        self.assertEqual(parsed["numero_nf"], "1065444")
-        self.assertEqual(parsed["valor_nf"], 67.9)
-        self.assertEqual(parsed["data_nf"], "24/12/2024")
-        self.assertEqual(parsed["empresa_nome"], "PRINCIPAL VAREJO DE COSMÉTICOS")
-        self.assertEqual(parsed["razao_nf"], "PRINCIPAL VAREJO DE COSMÉTICOS")
-
     def test_parse_invoice_from_text_strips_company_prefix_labels(self):
         sample_text = """
         NF-e N° 1065444
@@ -668,7 +355,7 @@ class ModelFlowTest(unittest.TestCase):
         client = TestClient(app)
         client.post("/login", data={"username": "mercado", "password": "mercado123"})
 
-        sample = "NF-e N° 1065444\nDATA DE RECEBIMENTO 24/12/2024\nPRINCIPAL VAREJO DE COSMÉTICOS\nTOTAL DA NOTA R$ 67,90".encode("utf-8")
+        sample = b"NF-e N° 1065444\nDATA DE RECEBIMENTO 24/12/2024\nPRINCIPAL VAREJO DE COSMÉTICOS\nTOTAL DA NOTA R$ 67,90"
         response = client.post(
             "/nfs/preview",
             files={"file": ("nf-1065444.txt", sample, "text/plain")},

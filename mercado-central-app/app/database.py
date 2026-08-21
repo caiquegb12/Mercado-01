@@ -1,14 +1,9 @@
 import os
-from pathlib import Path
 from sqlalchemy import create_engine, Column, Integer, String, Float, Date, DateTime, ForeignKey, Text, LargeBinary, inspect, text
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from datetime import date, datetime
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = (DATA_DIR / "mercado_central.db").resolve()
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH.as_posix()}")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/mercado_central.db")
 
 Base = declarative_base()
 

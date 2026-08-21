@@ -1,6 +1,5 @@
 import io
 import re
-import unicodedata
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -191,57 +190,11 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
     return ocr_image_bytes(pdf_bytes)
 
 
-def decode_mojibake(value: str) -> str:
-    if not value:
-        return ""
-
-    repaired = value
-    replacements = {
-        "Â°": "º",
-        "Â": "",
-        "Ã": "Ã",
-        "Ã©": "é",
-        "Ã¡": "á",
-        "Ã£": "ã",
-        "Ã´": "ô",
-        "Ã§": "ç",
-        "Ãº": "ú",
-        "Ã–": "Ö",
-        "Ã©": "é",
-        "Ã‰": "É",
-        "Ã³": "ó",
-        "Ãµ": "õ",
-        "Ã\xa9": "é",
-        "Ã\x81": "Á",
-        "Ã\x83": "Ã",
-        "Ã\x87": "Ç",
-        "Ã\x89": "É",
-        "Ã\x93": "“",
-        "Ã\x94": "”",
-        "Ã\x99": "™",
-        "\x89": "é",
-        "\x80": "",
-        "�": "",
-    }
-
-    for wrong, correct in replacements.items():
-        repaired = repaired.replace(wrong, correct)
-
-    repaired = repaired.replace("\ufffd", "")
-    repaired = repaired.replace("\x00", "")
-    repaired = repaired.replace("\r", "\n")
-
-    if "Ã" in repaired and "Â" in repaired:
-        repaired = repaired.replace("Â", "")
-
-    return repaired
-
-
 def parse_invoice_from_text(text: str, filename: str = "") -> dict:
-    raw_text = decode_mojibake(text or "")
+    raw_text = (text or "")
     raw_text = raw_text.replace("�\x89", "é").replace("\x89", "é").replace("\x80", "")
     raw_text = raw_text.replace("\r", "\n")
-    full_text = raw_text + "\n" + (decode_mojibake(filename or ""))
+    full_text = raw_text + "\n" + (filename or "")
     result = {
         "empresa_nome": "",
         "numero_nf": "",
@@ -253,129 +206,45 @@ def parse_invoice_from_text(text: str, filename: str = "") -> dict:
     def normalize_company_name(value: str) -> str:
         cleaned = (value or "").strip()
         cleaned = cleaned.replace("\u200b", "").replace("\x00", "")
-        cleaned = re.sub(r"^(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|PRESTADOR\s*/\s*FORNECEDOR|EMITENTE\s*DA\s*NFS-E|NATUREZA\s+DA\s+OPERA[ÇC]AO|NATUREZA|OPERACAO|NOME\s*/\s*NOME\s+EMPRESARIAL|NOME\s+EMPRESARIAL|NOME\s+FANTASIA|NOME|EMPRESA|MUNIC[ÍI]PIO|CIDADE|UF|ESTADO|ENDERE[ÇC]O|BAIRRO|CEP|PA[ÍI]S)\s*[:\-]?\s*", "", cleaned, flags=re.I)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
-        cleaned = re.sub(r"\s*(?:MUNIC[ÍI]PIO|CIDADE)\s*[:\-]?\s*[A-ZÀ-ŸÁÉÍÓÚÃÕÂÊÇ0-9 .'-]+(?:/\s*[A-Z]{2}|\s+[A-Z]{2})\s*$", "", cleaned, flags=re.I)
-        cleaned = re.sub(r"\s*(?:UF|ESTADO)\s*[:\-]?\s*[A-Z]{2}\s*$", "", cleaned, flags=re.I)
-        cleaned = re.sub(r"\s*[/\-]\s*[A-Z]{2}\s*$", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"^(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|NATUREZA\s+DA\s+OPERA[ÇC]AO|NATUREZA|OPERACAO|NOME\s+FANTASIA|NOME|EMPRESA)\s*[:\-]?\s*", "", cleaned, flags=re.I)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
 
-        if re.search(r"\d", cleaned) and not re.search(r"[A-Za-zÀ-ÿ]", cleaned):
+        if re.search(r"^(?:COMPRA|VENDA|MERCADORIA|SERVI[ÇC]O|SERVICO|OPERA[ÇC]AO|NATUREZA|TOTAL|VALOR|DATA|NF|NOTA)", cleaned, flags=re.I):
             return ""
-
-        def strip_nfs_status_prefix(value_text: str) -> str:
-            text = (value_text or "").strip()
-            if not text:
-                return ""
-
-            ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
-            pattern = r"^(?:SITUACAO\s*DA\s*NFS(?:-E)?|SITUACAO\s*DA\s*NFSE)\s*[:\-]?\s*(?:(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA)\s*[:\-]?\s*)?"
-            stripped = re.sub(pattern, "", ascii_text, flags=re.I)
-            if stripped != ascii_text:
-                return stripped.strip()
-
-            suffix_pattern = r"^(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA)\s*[:\-]?\s*"
-            stripped = re.sub(suffix_pattern, "", ascii_text, flags=re.I)
-            if stripped != ascii_text:
-                return stripped.strip()
-            return text
-
-        cleaned = strip_nfs_status_prefix(cleaned)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_")
-
-        if re.search(r"^(?:COMPRA|VENDA|MERCADORIA|SERVI[ÇC]O|SERVICO|OPERA[ÇC]AO|NATUREZA|TOTAL|VALOR|DATA|NF|NOTA|PRESTADOR|FORNECEDOR|FINALIDADE|INDICADOR\s+MUNICIPAL(?:\s*\([^)]*\))?|NFS(?:-E)?\s*(?:GERADA|REGULAR)|NOME\s*/\s*NOME\s+EMPRESARIAL|NOME\s+EMPRESARIAL|MUNIC[ÍI]PIO|CIDADE|UF|ESTADO|ENDERE[ÇC]O|BAIRRO|CEP|PA[ÍI]S|SITUA[ÇC]A[O0]?\s*DA\s*NFS(?:-E)?|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA|CNPJ\s*/\s*CPF\s*/\s*NIF|CNPJ|CPF|NIF|TELEFONE)", cleaned, flags=re.I):
-            return ""
-
-        if re.fullmatch(r"[\d\./\-()]+", cleaned):
-            return ""
-
-        if re.search(r"^(?:MUNIC[ÍI]PIO|CIDADE)\s*[:\-]?\s*[A-ZÀ-Ÿ\s]+(?:/\s*[A-Z]{2}|\s+[A-Z]{2})$", cleaned, flags=re.I):
-            return ""
-        if re.search(r"^(?:UF|ESTADO)\s*[:\-]?\s*[A-Z]{2}$", cleaned, flags=re.I):
-            return ""
-
-        if re.search(r"^(?:SITUA[ÇC]A[O0]?\s*DA\s*NFS(?:-E)?(?:\s*[:\-]?\s*(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA))?|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA|FINALIDADE|INDICADOR\s+MUNICIPAL|NFS(?:-E)?\s*(?:GERADA|REGULAR))$", cleaned, flags=re.I):
-            return ""
-
-        if re.search(r"(?:^|\s)mercado\s+central(?:\s+app)?(?:$|\s)", cleaned, flags=re.I) or re.search(r"^empresa\s+demo$", cleaned, flags=re.I):
-            return ""
-
-        if re.fullmatch(r"[A-ZÀ-Ÿ][A-Za-zÀ-ÿ' .-]{0,80}", cleaned) and not re.search(r"(?:LTDA|Ltda|S\.A|SA|MEI|EIRELI|INDUSTRIA|COM[ÉE]RCIO|SERVI[ÇC]OS|SERVICOS|BENS|CONSULTORIA|MATERIAIS|IMPORTA[ÇC]AO)", cleaned, flags=re.I):
-            if re.search(r"^(?:[A-ZÀ-Ÿ]+|[A-ZÀ-Ÿ][a-zà-ÿ]+)$", cleaned) and len(cleaned.split()) <= 2:
-                if cleaned.lower() in {"jundiai", "sao paulo", "campinas", "santos", "osasco", "guarulhos", "curitiba", "rio", "rio de janeiro", "belo horizonte", "porto alegre", "salvador", "recife", "fortaleza", "brasilia", "goiania", "manaus", "belem", "sp", "rj", "mg", "pr", "sc", "rs", "df", "ce", "pe", "ba", "ma", "pa"}:
-                    return ""
-
         return cleaned
 
-    def is_valid_company_candidate(value: str) -> bool:
-        cleaned = normalize_company_name(value)
-        if not cleaned or re.fullmatch(r"\d{1,12}", cleaned):
-            return False
-        if re.search(r"^(?:N(?:U|Ú|U)MERO|COMPET[ÊE]NCIA|VALOR|TOTAL|DATA|NF|NOTA|MUNIC[ÍI]PIO|CIDADE|UF|ESTADO|R\$)", cleaned, flags=re.I):
-            return False
-        return len(cleaned.strip()) >= 3
-
-    def set_company_field(field_name: str, candidate: str):
-        cleaned = normalize_company_name(candidate)
-        if not cleaned or not is_valid_company_candidate(cleaned):
-            return
-
-        if field_name == "empresa_nome":
-            if not result["empresa_nome"]:
-                result["empresa_nome"] = cleaned
-            elif result["empresa_nome"] == result["razao_nf"] and result["razao_nf"] != cleaned:
-                result["empresa_nome"] = cleaned
-        elif field_name == "razao_nf":
-            if not result["razao_nf"]:
-                result["razao_nf"] = cleaned
-            elif result["razao_nf"] == result["empresa_nome"] and result["empresa_nome"] != cleaned:
-                result["razao_nf"] = cleaned
-
-    is_nfs_context = bool(re.search(r"(?:DANFSe|NFS-e|NFS-E)", full_text, flags=re.I))
-
-    if not is_nfs_context:
-        explicit_company_patterns = [
-            ("empresa_nome", r"(?:NOME\s+FANTASIA|NOME\s*/\s*NOME\s+EMPRESARIAL|NOME\s+EMPRESARIAL|EMPRESA)\s*[:\-]?\s*([A-Za-zÀ-ÿ0-9 .&/()\-]+)"),
-            ("razao_nf", r"(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|DENOMINA[ÇC]A[O0]\s+SOCIAL)\s*[:\-]?\s*([A-Za-zÀ-ÿ0-9 .&/()\-]+)"),
-        ]
-        for field_name, pattern in explicit_company_patterns:
-            match = re.search(pattern, full_text, flags=re.I)
-            if match:
-                set_company_field(field_name, match.group(1))
-                if field_name == "empresa_nome" and not result["razao_nf"]:
-                    result["razao_nf"] = result["empresa_nome"]
-                if field_name == "razao_nf" and not result["empresa_nome"]:
-                    result["empresa_nome"] = result["razao_nf"]
+    explicit_company_patterns = [
+        r"(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|DENOMINA[ÇC]A[O0]\s+SOCIAL|NOME\s+FANTASIA|EMPRESA)\s*[:\-]?\s*([A-Za-zÀ-ÿ0-9 .&/()\-]+)",
+    ]
+    for pattern in explicit_company_patterns:
+        match = re.search(pattern, full_text, flags=re.I)
+        if match:
+            candidate_company = normalize_company_name(match.group(1))
+            if candidate_company:
+                result["empresa_nome"] = candidate_company
                 break
 
-        cleaned_lines = [line.strip() for line in re.split(r"[\n\r]+", full_text) if line.strip()]
-        if not result["empresa_nome"]:
-            candidate_lines = []
-            for line in cleaned_lines:
-                repair_line = line.replace("�\x89", "é").replace("\x89", "é").replace("\x80", "")
-                repair_line = normalize_company_name(repair_line)
-                if not repair_line or len(repair_line) < 6:
-                    continue
-                if re.search(r"(?:NF|NFE|NOTA|FATURA|DANFE|CNPJ|IE|CHAVE|SÉRIE|SERIE|TOTAL|VALOR|PAGAMENTO|EMISS|DATA|R\$|COMPRA|VENDA|MERCADORIA|SERVI[ÇC]O|SERVICO|OPERA[ÇC]AO|NATUREZA|MUNIC[ÍI]PIO|CIDADE|UF|ESTADO|ENDERE[ÇC]O|BAIRRO)", repair_line, flags=re.I):
-                    continue
-                if re.search(r"[A-Za-zÀ-ÿ]", repair_line) and not re.search(r"\d", repair_line):
-                    candidate_lines.append(repair_line)
+    cleaned_lines = [line.strip() for line in re.split(r"[\n\r]+", full_text) if line.strip()]
+    if not result["empresa_nome"]:
+        candidate_lines = []
+        for line in cleaned_lines:
+            repair_line = line.replace("�\x89", "é").replace("\x89", "é").replace("\x80", "")
+            repair_line = normalize_company_name(repair_line)
+            if not repair_line or len(repair_line) < 6:
+                continue
+            if re.search(r"(?:NF|NFE|NOTA|FATURA|DANFE|CNPJ|IE|CHAVE|SÉRIE|SERIE|TOTAL|VALOR|PAGAMENTO|EMISS|DATA|R\$|COMPRA|VENDA|MERCADORIA|SERVI[ÇC]O|SERVICO|OPERA[ÇC]AO|NATUREZA)", repair_line, flags=re.I):
+                continue
+            if re.search(r"[A-Za-zÀ-ÿ]", repair_line) and not re.search(r"\d", repair_line):
+                candidate_lines.append(repair_line)
 
-            if candidate_lines:
-                result["empresa_nome"] = normalize_company_name(max(candidate_lines, key=len))
+        if candidate_lines:
+            result["empresa_nome"] = normalize_company_name(max(candidate_lines, key=len))
 
     file_name = Path(filename or "").stem or ""
-    file_name_normalized = file_name.strip()
-    file_name_has_nf_marker = bool(re.search(
-        r"(?i)(?:^|[_\-\s])(?:NF|NFE|NOTA|FATURA)(?:[_\-\s]*E)?(?:[_\-\s]*\d{1,12})",
-        file_name_normalized,
-    ))
-
     if file_name:
-        if file_name_has_nf_marker:
-            match = re.search(r"(?i)([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .&-]{4,80})(?:\s+(?:NF|NFE|NOTA|FATURA|DANFE)[-\s]?[A-Z0-9/.-]+)", file_name)
-            if match and not result["empresa_nome"]:
-                result["empresa_nome"] = normalize_company_name(match.group(1))
+        match = re.search(r"(?i)([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .&-]{4,80})(?:\s+(?:NF|NFE|NOTA|FATURA)[-\s]?[A-Z0-9/.-]+)", file_name)
+        if match and not result["empresa_nome"]:
+            result["empresa_nome"] = normalize_company_name(match.group(1))
 
     def normalize_nf_number(raw_value: str) -> str:
         digits = re.sub(r"\D", "", str(raw_value or ""))
@@ -383,196 +252,77 @@ def parse_invoice_from_text(text: str, filename: str = "") -> dict:
             return ""
         return digits.lstrip("0") or "0"
 
-    if is_nfs_context:
-        lines = [line.strip() for line in re.split(r"[\n\r]+", full_text) if line.strip()]
+    numero_patterns = [
+        r"(?:NF(?:[- ]?E)?|NFE|NOTA\s*FISCAL|N[º°]|NÚMERO|NUMERO)\s*[:\-]*\s*(?:N[º°]\s*)?([0-9]{1,12})",
+        r"(?:NF(?:[- ]?E)?|NFE|NOTA\s*FISCAL|N[º°]|NÚMERO|NUMERO)[^\d]{0,15}([0-9]{1,12})",
+    ]
+    for pattern in numero_patterns:
+        numero_match = re.search(pattern, full_text, flags=re.I)
+        if numero_match:
+            candidate_number = normalize_nf_number(numero_match.group(1))
+            if candidate_number:
+                result["numero_nf"] = candidate_number
+                break
 
-        for index, line in enumerate(lines):
-            normalized_line = re.sub(r"\s+", " ", line).strip()
-
-            if re.search(r"(?:N(?:U|Ú|U)MERO\s*DA\s*NFS(?:-E)?|N(?:U|Ú|U)MERO\s*DA\s*NF(?:-E)?)", normalized_line, flags=re.I):
-                for next_index in range(index + 1, min(index + 4, len(lines))):
-                    candidate = re.sub(r"\s+", " ", lines[next_index]).strip()
-                    if not candidate:
-                        continue
-                    number_match = re.search(r"([0-9]{1,12})", candidate)
-                    if number_match:
-                        result["numero_nf"] = normalize_nf_number(number_match.group(1))
+    if not result["numero_nf"]:
+        for line in re.split(r"[\n\r]+", full_text):
+            if re.search(r"(?:NF|NFE|NOTA FISCAL|N[º°]|NÚMERO|NUMERO)", line, flags=re.I):
+                numbers = re.findall(r"\d{3,12}", line)
+                for number in numbers:
+                    candidate_number = normalize_nf_number(number)
+                    if candidate_number:
+                        result["numero_nf"] = candidate_number
                         break
+                if result["numero_nf"]:
+                    break
 
-            if re.search(r"(?:COMPET[ÊE]NCIA\s*DA\s*NFS-E|DATA\s+E\s+HORA\s+DA\s+EMISS[ÃA]O\s*DA\s*NFS-E|DATA\s+DE\s+EMISS[ÃA]O\s*DA\s*NFS-E|COMPET[ÊE]NCIA)", normalized_line, flags=re.I):
-                for next_index in range(index + 1, min(index + 4, len(lines))):
-                    candidate = re.sub(r"\s+", " ", lines[next_index]).strip()
-                    date_match = re.search(r"([0-9]{2}/[0-9]{2}/[0-9]{4})", candidate)
-                    if date_match:
-                        result["data_nf"] = date_match.group(1)
-                        break
-
-            razao_match = re.search(r"(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|DENOMINA[ÇC]A[O0]\s+SOCIAL)\s*[:\-]?\s*([A-Za-zÀ-ÿ0-9 .&/()\-]+)", normalized_line, flags=re.I)
-            if razao_match:
-                repaired_candidate = normalize_company_name(razao_match.group(1))
-                if repaired_candidate and is_valid_company_candidate(repaired_candidate) and not result["razao_nf"]:
-                    result["razao_nf"] = repaired_candidate
-
-            if re.search(r"(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|DENOMINA[ÇC]A[O0]\s+SOCIAL)\s*[:\-]?", normalized_line, flags=re.I):
-                for next_index in range(index + 1, min(index + 4, len(lines))):
-                    candidate = re.sub(r"\s+", " ", lines[next_index]).strip()
-                    if not candidate:
-                        continue
-                    if re.search(r"^(?:RAZ[AÃ]O\s+SOCIAL|RAZAO\s+SOCIAL|DENOMINA[ÇC]A[O0]\s+SOCIAL|N(?:U|Ú|U)MERO|COMPET[ÊE]NCIA|CNPJ|CPF|NIF|TELEFONE|ENDERE[ÇC]O|EMAIL|MUNIC[ÍI]PIO|UF|ESTADO)", candidate, flags=re.I):
-                        continue
-                    repaired_candidate = normalize_company_name(candidate)
-                    if repaired_candidate and is_valid_company_candidate(repaired_candidate) and not result["razao_nf"]:
-                        result["razao_nf"] = repaired_candidate
-                        break
-
-            if re.search(r"^(?:INDICADOR\s+MUNICIPAL(?:\s*\([^)]*\))?|FINALIDADE|NFS(?:-E)?\s*(?:GERADA|REGULAR)|SITUA[ÇC]A[O0]?\s*DA\s*NFS(?:-E)?|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA)\s*[:\-]?(?:\s*(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA))?$", normalized_line, flags=re.I):
-                for next_index in range(index + 1, min(index + 5, len(lines))):
-                    candidate = re.sub(r"\s+", " ", lines[next_index]).strip()
-                    if not candidate:
-                        continue
-                    if re.search(r"^(?:INDICADOR\s+MUNICIPAL(?:\s*\([^)]*\))?|FINALIDADE|NFS(?:-E)?\s*(?:GERADA|REGULAR)|SITUA[ÇC]A[O0]?\s*DA\s*NFS(?:-E)?|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA|N(?:U|Ú|U)MERO|COMPET[ÊE]NCIA|VALOR|TOTAL|R\$|CNPJ|CPF|MUNIC[ÍI]PIO|UF|ESTADO)", candidate, flags=re.I):
-                        continue
-                    repaired_candidate = normalize_company_name(candidate)
-                    if repaired_candidate and is_valid_company_candidate(repaired_candidate):
-                        if not result["empresa_nome"]:
-                            result["empresa_nome"] = repaired_candidate
-                        if not result["razao_nf"]:
-                            result["razao_nf"] = repaired_candidate
-                        break
-                continue
-
-            status_label_match = re.search(r"^(?:SITUA[ÇC]A[O0]?\s*DA\s*NFS(?:-E)?|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA)\s*[:\-]?(?:\s*(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA))?\s*(.*)$", normalized_line, flags=re.I)
-            if not status_label_match:
-                ascii_line = unicodedata.normalize("NFKD", normalized_line).encode("ascii", "ignore").decode("ascii")
-                status_label_match = re.search(r"^(?:SITUACAO\s*DA\s*NFS(?:-E)?|SITUACAO\s*DA\s*NFSE|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[AO]O\s+EMITIDA)\s*[:\-]?(?:\s*(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[AO]O\s+EMITIDA))?\s*(.*)$", ascii_line, flags=re.I)
-
-            if status_label_match:
-                remaining = (status_label_match.group(1) or "").strip()
-                if remaining:
-                    repaired_candidate = normalize_company_name(remaining)
-                    if repaired_candidate and is_valid_company_candidate(repaired_candidate):
-                        if not result["empresa_nome"]:
-                            result["empresa_nome"] = repaired_candidate
-                        if not result["razao_nf"]:
-                            result["razao_nf"] = repaired_candidate
-                for next_index in range(index + 1, min(index + 4, len(lines))):
-                    candidate = re.sub(r"\s+", " ", lines[next_index]).strip()
-                    if not candidate:
-                        continue
-                    if re.search(r"^(?:SITUA[ÇC]A[O0]?\s*DA\s*NFS(?:-E)?|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[ÃA]O\s+EMITIDA|N(?:U|Ú|U)MERO|COMPET[ÊE]NCIA|VALOR|TOTAL|R\$|CNPJ|CPF|MUNIC[ÍI]PIO|UF|ESTADO)", candidate, flags=re.I):
-                        continue
-                    repaired_candidate = normalize_company_name(candidate)
-                    if repaired_candidate and is_valid_company_candidate(repaired_candidate):
-                        if not result["empresa_nome"]:
-                            result["empresa_nome"] = repaired_candidate
-                        if not result["razao_nf"]:
-                            result["razao_nf"] = repaired_candidate
-                        break
-
-            nome_empresa_match = re.search(r"(?:PRESTADOR\s*/\s*FORNECEDOR|EMITENTE\s*DA\s*NFS-E|NOME\s*/\s*NOME\s+EMPRESARIAL|NOME\s+EMPRESARIAL|NOME\s+FANTASIA)\s*[:\-]?\s*([A-Za-zÀ-ÿ0-9 .&/()\-]+)", normalized_line, flags=re.I)
-            if nome_empresa_match:
-                repaired_candidate = normalize_company_name(nome_empresa_match.group(1))
-                if repaired_candidate and is_valid_company_candidate(repaired_candidate) and not result["empresa_nome"]:
-                    result["empresa_nome"] = repaired_candidate
-
-            if re.search(r"(?:PRESTADOR\s*/\s*FORNECEDOR|EMITENTE\s*DA\s*NFS-E|NOME\s*/\s*NOME\s+EMPRESARIAL|NOME\s+EMPRESARIAL|NOME\s+FANTASIA)\s*[:\-]?", normalized_line, flags=re.I):
-                for next_index in range(index + 1, min(index + 8, len(lines))):
-                    candidate = re.sub(r"\s+", " ", lines[next_index]).strip()
-                    if not candidate:
-                        continue
-                    if re.search(r"^(?:PRESTADOR|FORNECEDOR|EMITENTE|NOME\s*/\s*NOME\s+EMPRESARIAL|NOME\s+EMPRESARIAL|NOME\s+FANTASIA|N(?:U|Ú|U)MERO|COMPET[ÊE]NCIA|CNPJ|CPF|NIF|TELEFONE|ENDERE[ÇC]O|EMAIL)", candidate, flags=re.I):
-                        continue
-                    repaired_candidate = normalize_company_name(candidate)
-                    if repaired_candidate and is_valid_company_candidate(repaired_candidate) and not result["empresa_nome"]:
-                        result["empresa_nome"] = repaired_candidate
-                        break
-
-            if re.search(r"(?:VALOR\s*L[ÍI]QUIDO\s*NFS(?:-E)?\s*(?:\+\s*IBS/CBS|\+\s*IBS|\+\s*CBS)?|VALOR\s*DA\s*OPERA(?:[ÇC]?[ÃA]?)?O/SERVI(?:[ÇC]?)?O|VALOR\s*TOTAL\s*DA\s*NFS-E|VALOR\s*L[ÍI]QUIDO\s*DA\s*NFS-E)", normalized_line, flags=re.I):
-                for next_index in range(index + 1, min(index + 3, len(lines))):
-                    candidate = re.sub(r"\s+", " ", lines[next_index]).strip()
-                    amount_match = re.search(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", candidate, flags=re.I)
-                    if amount_match:
-                        result["valor_nf"] = parse_money_to_float(amount_match.group(1))
-                        break
-
-        if not result["empresa_nome"] and result["razao_nf"]:
-            result["empresa_nome"] = result["razao_nf"]
-        if not result["razao_nf"] and result["empresa_nome"]:
-            result["razao_nf"] = result["empresa_nome"]
-
-    if not is_nfs_context:
-        numero_patterns = [
-            r"(?:NF(?:[- ]?E)?|NFE|NOTA\s*FISCAL|N[º°]|NÚMERO|NUMERO)\s*[:\-]*\s*(?:N[º°]\s*)?([0-9]{1,12})",
-            r"(?:NF(?:[- ]?E)?|NFE|NOTA\s*FISCAL|N[º°]|NÚMERO|NUMERO)[^\d]{0,15}([0-9]{1,12})",
-        ]
+    if not result["numero_nf"]:
         for pattern in numero_patterns:
-            numero_match = re.search(pattern, full_text, flags=re.I)
-            if numero_match:
-                candidate_number = normalize_nf_number(numero_match.group(1))
+            filename_match = re.search(pattern, file_name, flags=re.I)
+            if filename_match:
+                candidate_number = normalize_nf_number(filename_match.group(1))
                 if candidate_number:
                     result["numero_nf"] = candidate_number
                     break
 
-        if not result["numero_nf"]:
-            for line in re.split(r"[\n\r]+", full_text):
-                if re.search(r"(?:NF|NFE|NOTA FISCAL|N[º°]|NÚMERO|NUMERO)", line, flags=re.I):
-                    numbers = re.findall(r"\d{3,12}", line)
-                    for number in numbers:
-                        candidate_number = normalize_nf_number(number)
-                        if candidate_number:
-                            result["numero_nf"] = candidate_number
-                            break
-                    if result["numero_nf"]:
-                        break
+    final_total_pattern = r"(?:valor\s*(?:total|liquido)(?!\s+dos\s+produtos\b)(?:\s*(?:da\s*)?(?:nota|nf)|\s*da\s*nota)|total\s*(?:da\s*)?(?:nota|nf)|total\s*geral)"
+    product_total_pattern = r"(?:valor\s*(?:total|liquido)\s*(?:dos\s*produtos|de\s*produtos)|total\s*(?:dos\s*produtos|de\s*produtos)|valor\s*dos\s*produtos|subtotal)"
 
-        if not result["numero_nf"] and file_name_has_nf_marker:
-            for pattern in numero_patterns:
-                filename_match = re.search(pattern, file_name, flags=re.I)
-                if filename_match:
-                    candidate_number = normalize_nf_number(filename_match.group(1))
-                    if candidate_number:
-                        result["numero_nf"] = candidate_number
-                        break
+    explicit_total_match = None
+    for line in re.split(r"[\n\r]+", full_text):
+        normalized_line = line.strip()
+        if not normalized_line:
+            continue
 
-    if not is_nfs_context:
-        final_total_pattern = r"(?:valor\s*(?:total|liquido)(?!\s+(?:dos\s+produtos|de\s+produtos)\b)(?:\s*(?:da\s*)?(?:nota|nf))?|total\s*(?:da\s*)?(?:nota|nf)|total\s*geral)"
-        product_total_pattern = r"(?:valor\s*(?:total|liquido)\s*(?:dos\s*produtos|de\s*produtos)|total\s*(?:dos\s*produtos|de\s*produtos)|valor\s*dos\s*produtos|subtotal)"
+        if re.search(final_total_pattern, normalized_line, flags=re.I):
+            amount_match = re.search(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", normalized_line, flags=re.I)
+            if amount_match:
+                explicit_total_match = amount_match
+                break
 
-        explicit_total_match = None
+    if explicit_total_match:
+        result["valor_nf"] = parse_money_to_float(explicit_total_match.group(1))
+    else:
+        product_total_match = None
         for line in re.split(r"[\n\r]+", full_text):
             normalized_line = line.strip()
             if not normalized_line:
                 continue
-
-            if re.search(final_total_pattern, normalized_line, flags=re.I):
+            if re.search(product_total_pattern, normalized_line, flags=re.I):
                 amount_match = re.search(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", normalized_line, flags=re.I)
                 if amount_match:
-                    explicit_total_match = amount_match
+                    product_total_match = amount_match
                     break
 
-        if explicit_total_match:
-            result["valor_nf"] = parse_money_to_float(explicit_total_match.group(1))
+        if product_total_match:
+            result["valor_nf"] = parse_money_to_float(product_total_match.group(1))
         else:
-            product_total_match = None
-            for line in re.split(r"[\n\r]+", full_text):
-                normalized_line = line.strip()
-                if not normalized_line:
-                    continue
-                if re.search(product_total_pattern, normalized_line, flags=re.I):
-                    amount_match = re.search(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", normalized_line, flags=re.I)
-                    if amount_match:
-                        product_total_match = amount_match
-                        break
+            money_values = re.findall(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", full_text, flags=re.I)
+            if money_values:
+                result["valor_nf"] = parse_money_to_float(money_values[-1])
 
-            if product_total_match:
-                result["valor_nf"] = parse_money_to_float(product_total_match.group(1))
-            else:
-                money_values = re.findall(r"(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*(?:[.,][0-9]{2})|[0-9]+(?:[.,][0-9]{2}))", full_text, flags=re.I)
-                if money_values:
-                    result["valor_nf"] = parse_money_to_float(money_values[-1])
-
-    if result["valor_nf"] == 0 and file_name_has_nf_marker:
-        filename_value_match = re.search(r"(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))", file_name)
+    if result["valor_nf"] == 0:
+        filename_value_match = re.search(r"(\d+(?:[.,]\d{2}))", file_name)
         if filename_value_match:
             result["valor_nf"] = parse_money_to_float(filename_value_match.group(1))
 
@@ -590,11 +340,7 @@ def parse_invoice_from_text(text: str, filename: str = "") -> dict:
             result["data_nf"] = date_match.group(1)
 
     result["empresa_nome"] = normalize_company_name(result["empresa_nome"])
-    result["razao_nf"] = normalize_company_name(result["razao_nf"] or result["empresa_nome"])
-    if not result["empresa_nome"] and result["razao_nf"]:
-        result["empresa_nome"] = result["razao_nf"]
-    if not result["razao_nf"] and result["empresa_nome"]:
-        result["razao_nf"] = result["empresa_nome"]
+    result["razao_nf"] = normalize_company_name(result["empresa_nome"])
     return result
 
 
