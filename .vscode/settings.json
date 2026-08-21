@@ -1,0 +1,19 @@
+{
+    "chat.tools.edits.autoApprove": {
+        "**/*-lock.{yaml,json}": true,
+        "**/ruby_lsp/*/addon": true,
+        "**/*.lock": true,
+        "**/gradle.properties": true,
+        "**/*.{code-workspace,csproj,fsproj,vbproj,vcxproj,proj,targets,props,gradle,gradle.kts}": true,
+        "**/{.npmrc,.yarnrc,.yarnrc.yml,.pnpmfile.js,.pnpmfile.cjs,.pnpmfile.mjs,pnpm-workspace.yaml}": true,
+        "**/{package.json,server.xml,build.rs,web.config,.gitattributes,.env,Cargo.toml}": true,
+        "**/.vscode/*.json": true,
+        "**/.git/**": true
+    },
+    "chat.tools.terminal.autoApprove": {
+        "/^cd \"c:/Users/caiqu/OneDrive/Desktop/Projeto Mercado Central/mercado-central-app\"; python -m unittest tests\\.test_model_flow\\.ModelFlowTest\\.test_nf_preview_route_parses_uploaded_file$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

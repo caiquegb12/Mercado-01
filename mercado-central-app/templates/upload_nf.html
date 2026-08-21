@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}Cadastro de NF por upload{% endblock %}
+
+{% block content %}
+<section class="card" style="max-width: 960px; margin: 32px auto;">
+  <h2 style="margin-bottom: 18px;">📦 Cadastro de NF por upload</h2>
+
+  <form method="post" action="/nfs" enctype="multipart/form-data" id="nf-upload-form">
+    <div class="grid-2">
+      <label>Arquivo da NF
+        <input type="file" name="file" id="nf-file" accept=".pdf,.png,.jpg,.jpeg,.txt" required />
+      </label>
+
+      <label>Empresa da NF
+        <input type="text" name="empresa_nome" id="empresa_nome" placeholder="Será preenchida automaticamente" />
+      </label>
+
+      <label>Categoria do contrato
+        <select name="categoria" id="categoria">
+          <option value="" selected>Selecione a categoria</option>
+          <option value="fixo">Fixo</option>
+          <option value="pontual">Pontual</option>
+        </select>
+      </label>
+
+      <label>Tipo de serviço
+        <input type="text" name="tipo_servico" id="tipo_servico" placeholder="Ex.: Manutenção, limpeza, TI" />
+      </label>
+
+      <label>Descrição do contrato
+        <input type="text" name="descricao_contrato" id="descricao_contrato" placeholder="Descrição do contrato automático" />
+      </label>
+
+      <label>Razão NF
+        <input type="text" name="razao_nf" id="razao_nf" />
+      </label>
+
+      <label>Data NF
+        <input type="text" name="data_nf" id="data_nf" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" />
+      </label>
+
+      <label>Nº NF
+        <input type="text" name="numero_nf" id="numero_nf" />
+      </label>
+
+      <label>Valor NF
+        <input type="text" name="valor_nf" id="valor_nf" inputmode="decimal" placeholder="R$ 0,00" />
+      </label>
+
+      <label>Data de pagamento
+        <input type="text" name="data_pagamento" id="data_pagamento" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" />
+      </label>
+
+      <label>Forma de pagamento
+        <input type="text" name="forma_pagamento" id="forma_pagamento" />
+      </label>
+
+      <label>Status de conferência
+        <select name="status_conferencia" id="status_conferencia">
+          <option value="pendente" selected>Pendente</option>
+          <option value="confirmada">Confirmada</option>
+          <option value="rejeitada">Rejeitada</option>
+        </select>
+      </label>
+
+      <label style="grid-column: 1 / -1;">Descrição do item
+        <textarea name="descricao_item" id="descricao_item"></textarea>
+      </label>
+
+      <label style="grid-column: 1 / -1;">Observações
+        <textarea name="observacoes" id="observacoes"></textarea>
+      </label>
+    </div>
+
+    <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
+      <a href="/" class="btn-secondary">Voltar</a>
+      <button type="submit">Salvar NF</button>
+    </div>
+  </form>
+</section>
+
+<script>
+  const nfFileInput = document.getElementById('nf-file');
+  const camposAutomaticos = ['numero_nf', 'data_nf', 'valor_nf', 'empresa_nome', 'razao_nf', 'data_pagamento'];
+
+  function registrarEdicaoManual(input) {
+    if (!input) return;
+
+    const valorAutomatico = input.dataset.autoValor || '';
+    if (valorAutomatico && input.value === valorAutomatico) {
+      input.value = '';
+    }
+
+    input.dataset.userEdited = 'true';
+  }
+
+  function limparCamposAutomaticos() {
+    camposAutomaticos.forEach((fieldId) => {
+      const input = document.getElementById(fieldId);
+      if (!input) return;
+      delete input.dataset.autoValor;
+      input.dataset.userEdited = 'false';
+      input.value = '';
+    });
+  }
+
+  function parseValorMonetarioParaNumero(valor) {
+    if (valor === undefined || valor === null || valor === '') return NaN;
+
+    const texto = String(valor).replace(/R\$/g, '').replace(/\s/g, '').replace(/_/g, '').trim();
+    if (!texto) return NaN;
+
+    if (texto.includes(',') && texto.includes('.')) {
+      if (texto.lastIndexOf(',') > texto.lastIndexOf('.')) {
+        return Number(texto.replace(/\./g, '').replace(',', '.'));
+      }
+      return Number(texto.replace(/,/g, ''));
+    }
+
+    if (texto.includes(',')) {
+      return Number(texto.replace(/\./g, '').replace(',', '.'));
+    }
+
+    if (texto.includes('.')) {
+      if (/\.\d{1,2}$/.test(texto)) {
+        return Number(texto);
+      }
+      return Number(texto.replace(/\./g, ''));
+    }
+
+    return Number(texto);
+  }
+
+  function aplicarValorAutomatico(fieldId, valor) {
+    const input = document.getElementById(fieldId);
+    if (!input || !valor) return;
+
+    input.dataset.autoValor = valor;
+    const jaFoiEditado = input.dataset.userEdited === 'true';
+    if (fieldId === 'valor_nf') {
+      const valorNumerico = parseValorMonetarioParaNumero(valor);
+      if (!jaFoiEditado || !input.value.trim()) {
+        input.value = Number.isNaN(valorNumerico) ? `R$ ${valor}` : formatarValorMoeda(valorNumerico);
+        input.dataset.userEdited = 'false';
+      }
+      return;
+    }
+
+    if (!jaFoiEditado || !input.value.trim()) {
+      input.value = valor;
+      input.dataset.userEdited = 'false';
+    }
+  }
+
+  function aplicarMascaraData(value) {
+    const digits = (value || '').replace(/\D/g, '').slice(0, 8);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
+  function formatarValorMoeda(valor) {
+    if (valor === undefined || valor === null || valor === '') return '';
+    const numero = parseValorMonetarioParaNumero(valor);
+    if (Number.isNaN(numero)) return `R$ ${String(valor).trim()}`;
+    return `R$ ${numero.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  ['data_nf', 'data_pagamento', 'numero_nf', 'valor_nf', 'empresa_nome', 'razao_nf'].forEach((fieldId) => {
+    const input = document.getElementById(fieldId);
+    if (!input) return;
+    if (fieldId === 'data_nf' || fieldId === 'data_pagamento') {
+      input.setAttribute('placeholder', 'dd/mm/aaaa');
+      input.addEventListener('input', () => {
+        registrarEdicaoManual(input);
+        input.value = aplicarMascaraData(input.value);
+      });
+    } else if (fieldId === 'valor_nf') {
+      input.addEventListener('focus', () => {
+        const valorAutomatico = input.dataset.autoValor || '';
+        if (valorAutomatico && input.value === valorAutomatico) {
+          input.value = '';
+        }
+      });
+      input.addEventListener('input', () => {
+        registrarEdicaoManual(input);
+        const texto = input.value.replace(/[^\d,.-]/g, '');
+        if (!texto) {
+          input.value = 'R$ ';
+          return;
+        }
+        const numero = parseValorMonetarioParaNumero(texto);
+        if (!Number.isNaN(numero)) {
+          input.value = formatarValorMoeda(numero);
+        }
+      });
+    } else {
+      input.addEventListener('focus', () => {
+        const valorAutomatico = input.dataset.autoValor || '';
+        if (valorAutomatico && input.value === valorAutomatico) {
+          input.value = '';
+        }
+      });
+      input.addEventListener('input', () => registrarEdicaoManual(input));
+    }
+  });
+
+  document.getElementById('nf-upload-form')?.addEventListener('submit', (event) => {
+    const valorInput = document.getElementById('valor_nf');
+    if (valorInput) {
+      const numero = Number(String(valorInput.value).replace(/[R$\s.]/g, '').replace(',', '.'));
+      valorInput.value = Number.isNaN(numero) ? '0' : numero.toFixed(2);
+    }
+  });
+
+  function parsearNomeArquivoNF(fileName = '') {
+    if (!fileName) return {};
+
+    const nome = fileName.replace(/\.[^.]+$/, '').trim();
+    if (!nome) return {};
+
+    const temMarcadorNF = /(?:^|[_\-\s])(?:NF|NFE|NOTA|FATURA)(?:[_\-\s]*E)?(?:[_\-\s]*\d{1,12})/i.test(nome);
+    if (!temMarcadorNF) return {};
+
+    const dados = {};
+
+    const numeroMatch = nome.match(/(?:NF|NFE|NOTA|FATURA|N[º°]|SERIE|SÉRIE)[\s_\-º°]*?(\d{1,12})/i);
+    if (numeroMatch) {
+      dados.numero = numeroMatch[1];
+    }
+
+    const valorMatch = nome.match(/(?:VALOR|TOTAL|NOTA|NF|R\$)?[\s_\-.:/]*?(\d{1,3}(?:\.\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))/i);
+    if (valorMatch) {
+      const valorBruto = valorMatch[1].replace(/\./g, '').replace(',', '.');
+      if (!Number.isNaN(Number(valorBruto))) {
+        dados.valor = valorBruto;
+      }
+    }
+
+    const dataMatch = nome.match(/(?:DATA|EMISSAO|EMISSÃO|RECEBIMENTO)?[\s_\-./]*?(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})/i);
+    if (dataMatch) {
+      const raw = dataMatch[1];
+      if (raw.includes('-')) {
+        const partes = raw.split('-');
+        if (partes.length === 3) {
+          const [ano, mes, dia] = partes;
+          if (partes[0].length === 4) {
+            dados.data = `${dia}/${mes}/${ano}`;
+          }
+        }
+      } else {
+        const partes = raw.split(/[\\/]/);
+        if (partes.length === 3) {
+          const [dia, mes, ano] = partes;
+          dados.data = `${dia}/${mes}/${ano}`;
+        }
+      }
+    }
+
+    const empresaMatch = nome.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .&'-]{2,60}?)(?=(?:[\s_-]+(?:NF|NFE|NOTA|FATURA|N[º°]|SERIE|SÉRIE))|$)/i);
+    if (empresaMatch) {
+      const nomeEmpresa = empresaMatch[1].trim();
+      if (nomeEmpresa && !/^\d+$/.test(nomeEmpresa) && !/mercado\s+central|empresa\s+demo/i.test(nomeEmpresa)) {
+        dados.empresa = nomeEmpresa;
+      }
+    }
+
+    return dados;
+  }
+
+  function deveIgnorarEmpresaGenerica(nomeEmpresa) {
+    if (!nomeEmpresa) return true;
+
+    const nome = nomeEmpresa.trim();
+    const nomeNormalizado = nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+    if (/mercado\s+central|empresa\s+demo/i.test(nome)) return true;
+    if (/^(?:INDICADOR\s+MUNICIPAL(?:\s*\([^)]*\))?|MUNIC[ÍI]PIO|CIDADE|UF|ESTADO|PRESTADOR\s*\/\s*FORNECEDOR|NOME\s*\/\s*NOME\s+EMPRESARIAL|DANFSE|DANFE)\s*[:\-]?/i.test(nome)) return true;
+    if (/^(?:SITUACAO\s*DA\s*NFS(?:-E)?|SITUACAO\s*DA\s*NFS(?:-E)?\s*[:\-]?\s*(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[AÃ]O\s+EMITIDA)|EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|N[AÃ]O\s+EMITIDA|NAO\s+EMITIDA)\s*$/i.test(nome)) return true;
+    if (/^(?:SITUACAO\s*DA\s*NFS(?:-E)?|SITUACAO\s*DA\s*NFS(?:-E)?\s*[:\-]?\s*(?:EMITIDA|CANCELADA|PENDENTE|REJEITADA|DENEGADA|AUTORIZADA|NAO\s+EMITIDA|N[AÃ]O\s+EMITIDA))\b/i.test(nomeNormalizado)) return true;
+    if (/^(?:MUNIC[ÍI]PIO|CIDADE|UF|ESTADO)\s*[:\-]?/i.test(nome)) return true;
+    if (/^(?:SP|RJ|MG|PR|SC|RS|MS|MT|GO|DF|ES|BA|SE|AL|PE|PB|RN|CE|PI|MA|PA|AM|RO|AC|AP|TO|RR)\s*$/i.test(nome)) return true;
+    if (/^(?:[A-ZÀ-Ÿ\s]+\s*[-/]\s*[A-Z]{2}|[A-ZÀ-Ÿ\s]+\s*:\s*[A-Z]{2})$/i.test(nome)) return true;
+    return false;
+  }
+
+  if (nfFileInput) {
+    nfFileInput.addEventListener('change', async () => {
+      const file = nfFileInput.files?.[0];
+      if (!file) return;
+
+      limparCamposAutomaticos();
+
+      const dados = parsearNomeArquivoNF(file.name);
+      if (dados.numero) aplicarValorAutomatico('numero_nf', dados.numero);
+      if (dados.data) aplicarValorAutomatico('data_nf', dados.data);
+      if (dados.valor) aplicarValorAutomatico('valor_nf', Number(dados.valor).toFixed(2));
+      if (dados.empresa && !deveIgnorarEmpresaGenerica(dados.empresa)) {
+        aplicarValorAutomatico('empresa_nome', dados.empresa);
+        aplicarValorAutomatico('razao_nf', dados.empresa);
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const response = await fetch('/nfs/preview', {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+        });
+
+        if (response.ok) {
+          const payload = await response.json();
+          if (!payload.error) {
+            if (payload.numero_nf) aplicarValorAutomatico('numero_nf', payload.numero_nf);
+            if (payload.data_nf) aplicarValorAutomatico('data_nf', payload.data_nf);
+            if (payload.valor_nf !== undefined && payload.valor_nf !== null) {
+              aplicarValorAutomatico('valor_nf', Number(payload.valor_nf).toFixed(2));
+            }
+            if (payload.empresa_nome && !deveIgnorarEmpresaGenerica(payload.empresa_nome)) {
+              aplicarValorAutomatico('empresa_nome', payload.empresa_nome);
+            }
+            if (payload.razao_nf && !deveIgnorarEmpresaGenerica(payload.razao_nf)) {
+              aplicarValorAutomatico('razao_nf', payload.razao_nf);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao extrair dados da NF:', error);
+      }
+    });
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - Mercado Central</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="auth-shell">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <img src="/static/logo-mercado-central.png" alt="Mercado Central" class="brand-logo auth-logo" />
+          <div class="auth-brand-text">
+            <h1>MERCADO CENTRAL</h1>
+            <p>Gestão de Contratos</p>
+          </div>
+        </div>
+
+        <h2 style="text-align: center; margin: 16px 0; color: var(--primary-dark); font-size: 1.3rem;">Login</h2>
+
+        <p style="text-align: center; margin: 0 0 18px; color: var(--muted);">Acesse o painel para consultar contratos, empresas e notas fiscais.</p>
+
+        {% if error %}
+          <div class="auth-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="/login">
+          <label>
+            Usuário
+            <input type="text" name="username" value="{{ saved_username or 'mercado' }}" required />
+          </label>
+
+          <label>
+            Senha
+            <div class="password-input-wrap">
+              <input id="password" type="password" name="password" placeholder="Digite a senha" required />
+              <button type="button" class="password-toggle" data-target="password" aria-label="Mostrar senha">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 5c5.41 0 9.92 3.53 11 7-1.08 3.47-5.59 7-11 7S2.08 15.47 1 12c1.08-3.47 5.59-7 11-7Zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z"/>
+                </svg>
+              </button>
+            </div>
+          </label>
+
+          <label class="remember-box">
+            <input type="checkbox" name="remember_me" value="1" {% if remember_me %}checked{% endif %} />
+            Lembrar de mim
+          </label>
+
+          <button type="submit">Entrar no sistema</button>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const passwordInput = document.getElementById("password");
+        const toggleButton = document.querySelector(".password-toggle");
+
+        if (!passwordInput || !toggleButton) {
+          return;
+        }
+
+        toggleButton.addEventListener("click", function () {
+          const shouldShow = passwordInput.type === "password";
+          passwordInput.type = shouldShow ? "text" : "password";
+          toggleButton.setAttribute("aria-label", shouldShow ? "Ocultar senha" : "Mostrar senha");
+          toggleButton.classList.toggle("is-visible", shouldShow);
+        });
+      });
+    </script>
+  </body>
+</html>
