@@ -315,7 +315,7 @@
             <input type="text" name="numero_nf" />
           </label>
           <label>Valor NF
-            <input type="number" step="0.01" name="valor_nf" />
+            <input type="text" name="valor_nf" inputmode="decimal" placeholder="R$ 0,00" />
           </label>
           <label>Data de pagamento
             <input type="text" name="data_pagamento" inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" />
@@ -386,12 +386,71 @@
     return dados;
   }
 
+  function formatarValorManual(valor) {
+    const texto = String(valor ?? '').replace(/[^\d,.-]/g, '').trim();
+    if (!texto) return '';
+
+    const numero = Number(texto.replace(/\./g, '').replace(',', '.'));
+    if (Number.isNaN(numero)) return '';
+
+    return `R$ ${numero.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  }
+
   function aplicarMascaraData(value) {
     const digits = (value || '').replace(/\D/g, '').slice(0, 8);
     if (digits.length <= 2) return digits;
     if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
     return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
   }
+
+  const valorNfInputs = document.querySelectorAll('input[name="valor_nf"]');
+  valorNfInputs.forEach((input) => {
+    input.addEventListener('focus', () => {
+      const valorAtual = (input.value || '').trim();
+      if (valorAtual) {
+        input.value = '';
+      }
+      input.dataset.editando = 'true';
+    });
+
+    input.addEventListener('input', () => {
+      const somenteDigitos = String(input.value || '').replace(/\D/g, '');
+      input.value = somenteDigitos;
+      input.dataset.editando = 'true';
+    });
+
+    input.addEventListener('blur', () => {
+      const somenteDigitos = String(input.value || '').replace(/\D/g, '');
+      if (!somenteDigitos) {
+        input.dataset.editando = 'false';
+        return;
+      }
+
+      const valor = Number(somenteDigitos);
+      input.value = `R$ ${valor.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })}`;
+      input.dataset.editando = 'false';
+    });
+  });
+
+  document.querySelector('form[action="/nfs"]')?.addEventListener('submit', (event) => {
+    const campoValor = document.querySelector('input[name="valor_nf"]');
+    if (!campoValor) return;
+
+    const valorTexto = String(campoValor.value || '').replace(/[R$\s.]/g, '').replace(',', '.');
+    if (!valorTexto || valorTexto === '.') {
+      campoValor.value = '0.00';
+      return;
+    }
+
+    const valorNumerico = Number(valorTexto);
+    campoValor.value = Number.isNaN(valorNumerico) ? '0.00' : valorNumerico.toFixed(2);
+  });
 
   dateInputs.forEach((input) => {
     input.setAttribute('placeholder', 'dd/mm/aaaa');

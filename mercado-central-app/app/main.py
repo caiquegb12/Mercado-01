@@ -190,6 +190,57 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
     return ocr_image_bytes(pdf_bytes)
 
 
+def decode_mojibake(value: str) -> str:
+    if not value:
+        return ""
+
+    repaired = value
+    replacements = {
+        "Â°": "º",
+        "Â": "",
+        "Ã©": "é",
+        "Ã¡": "á",
+        "Ã£": "ã",
+        "Ã´": "ô",
+        "Ã§": "ç",
+        "Ãº": "ú",
+        "Ã–": "Ö",
+        "Ã‰": "É",
+        "Ã³": "ó",
+        "Ãµ": "õ",
+        "Ã\xa9": "é",
+        "Ã\x81": "Á",
+        "Ã\x83": "Ã",
+        "Ã\x87": "Ç",
+        "Ã\x89": "É",
+        "Ã\x93": "“",
+        "Ã\x94": "”",
+        "Ã\x99": "™",
+        "\x89": "é",
+        "\x80": "",
+        "�": "",
+    }
+
+    for wrong, correct in replacements.items():
+        repaired = repaired.replace(wrong, correct)
+
+    repaired = re.sub(r"([A-ZÀ-Ÿ])Ã©", r"\1É", repaired)
+    repaired = re.sub(r"([A-ZÀ-Ÿ])Ã¡", r"\1Á", repaired)
+    repaired = re.sub(r"([A-ZÀ-Ÿ])Ã£", r"\1Ã", repaired)
+    repaired = re.sub(r"([A-ZÀ-Ÿ])Ã³", r"\1Ó", repaired)
+    repaired = re.sub(r"([A-ZÀ-Ÿ])Ã§", r"\1Ç", repaired)
+    repaired = re.sub(r"([A-ZÀ-Ÿ])Ãµ", r"\1Õ", repaired)
+    repaired = repaired.replace("\ufffd", "")
+    repaired = repaired.replace("\x00", "")
+    repaired = repaired.replace("\r", "\n")
+    repaired = repaired.replace("Ã\x80", "À")
+    repaired = repaired.replace("Ã\x82", "á")
+    repaired = repaired.replace("Ã\x84", "ä")
+    if "Ã" in repaired and "Â" in repaired:
+        repaired = repaired.replace("Â", "")
+    return repaired
+
+
 def parse_invoice_from_text(text: str, filename: str = "") -> dict:
     raw_text = (text or "")
     raw_text = raw_text.replace("�\x89", "é").replace("\x89", "é").replace("\x80", "")
@@ -241,10 +292,26 @@ def parse_invoice_from_text(text: str, filename: str = "") -> dict:
             result["empresa_nome"] = normalize_company_name(max(candidate_lines, key=len))
 
     file_name = Path(filename or "").stem or ""
+<<<<<<< HEAD
     if file_name:
         match = re.search(r"(?i)([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .&-]{4,80})(?:\s+(?:NF|NFE|NOTA|FATURA)[-\s]?[A-Z0-9/.-]+)", file_name)
         if match and not result["empresa_nome"]:
             result["empresa_nome"] = normalize_company_name(match.group(1))
+=======
+    file_name_normalized = file_name.strip()
+    file_name_lower = file_name_normalized.lower()
+    file_name_has_nf_marker = bool(re.search(
+        r"(?i)(?:^|[_\-\s])(?:NF|NFE|NOTA|FATURA)(?:[_\-\s]*E)?(?:[_\-\s]*\d{1,12})",
+        file_name_normalized,
+    ))
+    is_generic_danfe_filename = bool(re.search(r"(?i)^(?:danfe|danfse|danf)\b", file_name_lower))
+
+    if file_name:
+        if file_name_has_nf_marker and not is_generic_danfe_filename:
+            match = re.search(r"(?i)([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 .&-]{4,80})(?:\s+(?:NF|NFE|NOTA|FATURA|DANFE)[-\s]?[A-Z0-9/.-]+)", file_name)
+            if match and not result["empresa_nome"]:
+                result["empresa_nome"] = normalize_company_name(match.group(1))
+>>>>>>> 18d4cd1 (Atualiza projeto Mercado Central)
 
     def normalize_nf_number(raw_value: str) -> str:
         digits = re.sub(r"\D", "", str(raw_value or ""))
@@ -659,6 +726,7 @@ def preview_nf_upload(request: Request, file: UploadFile = File(...)):
         return JSONResponse({"error": "arquivo_nao_enviado"}, status_code=400)
 
     uploaded_bytes = file.file.read()
+    file.file.seek(0)
     text = extract_pdf_text(uploaded_bytes)
     parsed = parse_invoice_from_text(text, file.filename)
     return {
@@ -680,7 +748,7 @@ def add_nf(
     razao_nf: str = Form(""),
     data_nf: str = Form(""),
     numero_nf: str = Form(""),
-    valor_nf: float = Form(0.0),
+    valor_nf: str = Form(""),
     data_pagamento: str = Form(""),
     forma_pagamento: str = Form(""),
     descricao_item: str = Form(""),
@@ -692,14 +760,18 @@ def add_nf(
     categoria = (categoria or "").strip() or "fixo"
 
     parsed = {}
+    uploaded_bytes = b""
     if file and getattr(file, "filename", None):
         uploaded_bytes = file.file.read()
+        file.file.seek(0)
         parsed = parse_invoice_from_text(extract_pdf_text(uploaded_bytes), file.filename)
 
     empresa_nome = (empresa_nome or parsed.get("empresa_nome") or "").strip()
     razao_nf = (razao_nf or parsed.get("razao_nf") or empresa_nome or "").strip()
     numero_nf = (numero_nf or parsed.get("numero_nf") or "").strip()
-    valor_nf = round_money(valor_nf or parsed.get("valor_nf") or 0)
+
+    valor_nf_manual = parse_money_to_float(valor_nf) if (valor_nf is not None and str(valor_nf).strip() != "") else None
+    valor_nf = round_money(valor_nf_manual if valor_nf_manual is not None else (parsed.get("valor_nf") or 0.0))
     data_nf = parsed.get("data_nf") or data_nf
     data_pagamento = data_pagamento or ""
 
@@ -710,6 +782,26 @@ def add_nf(
             contrato_id_value = int(contrato_id_text)
         except ValueError:
             contrato_id_value = None
+
+    if not contrato_id_value:
+        empresa = None
+        if empresa_nome:
+            empresa = db.query(Empresa).filter(Empresa.nome == empresa_nome).first()
+            if not empresa:
+                empresa = Empresa(
+                    nome=empresa_nome,
+                    cnpj="",
+                    tipo="Cliente",
+                    status="ativo",
+                    observacoes="Empresa criada automaticamente no cadastro de NF",
+                )
+                db.add(empresa)
+                db.commit()
+
+    if not numero_nf and file and getattr(file, "filename", None):
+        filename_match = re.search(r"(?i)(NF[-_ ]?[0-9]{1,12})", file.filename)
+        if filename_match:
+            numero_nf = filename_match.group(1).upper()
 
     if not contrato_id_value:
         empresa = None
@@ -766,6 +858,33 @@ def add_nf(
     )
     db.add(nf)
     db.commit()
+
+    if file and getattr(file, "filename", None):
+        uploaded_bytes = file.file.read()
+        file.file.seek(0)
+        contrato_relacionado = db.query(Contrato).filter(Contrato.id == contrato_id_value).first()
+        empresa_id_relacionado = (
+            contrato_relacionado.empresa_id
+            if contrato_relacionado and contrato_relacionado.empresa_id
+            else (
+                db.query(Empresa).filter(Empresa.nome == empresa_nome).first().id
+                if empresa_nome and db.query(Empresa).filter(Empresa.nome == empresa_nome).first()
+                else None
+            )
+        )
+
+        anexo = Anexo(
+            empresa_id=empresa_id_relacionado,
+            contrato_id=contrato_id_value,
+            nf_id=nf.id,
+            arquivo_nome=file.filename or "arquivo",
+            mime_type=file.content_type or "application/octet-stream",
+            tamanho=len(uploaded_bytes),
+            conteudo=uploaded_bytes,
+        )
+        db.add(anexo)
+        db.commit()
+
     db.close()
 
     mensagem = f"NF {numero_nf or 'registrada'} cadastrada"
@@ -810,26 +929,78 @@ def upload_nf_file(
     )
 
 
-def get_relatorio_data(categoria: str | None = None):
+@app.post("/nfs/{nf_id}/status")
+def update_nf_status(request: Request, nf_id: int, status_conferencia: str = Form("pendente")):
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=307)
+
+    db = SessionLocal()
+    nf = db.query(NF).filter(NF.id == nf_id).first()
+    mensagem = "Status atualizado"
+    if nf is not None:
+        numero_nf = nf.numero_nf or "NF sem número"
+        valor_status = normalize_nf_status(status_conferencia)
+        nf.status_conferencia = valor_status
+        db.commit()
+        mensagem = f"NF {numero_nf} alterada para {valor_status}."
+
+    db.close()
+
+    return RedirectResponse(url=f"/relatorio?msg={quote(mensagem)}", status_code=303)
+
+
+def normalize_report_category(value: str | None):
+    categoria = (value or '').strip().lower()
+    if categoria in {"", "todos", "geral"}:
+        return None
+    if categoria in {"fixo", "pontual"}:
+        return categoria
+    return None
+
+
+def get_relatorio_data(categoria: str | None = None, empresa: str | None = None):
     db = SessionLocal()
     nfs = db.query(NF).all()
+    busca = (empresa or '').strip().lower()
     filtradas = []
     for nf in nfs:
         contrato = db.query(Contrato).filter(Contrato.id == nf.contrato_id).first() if nf.contrato_id else None
+        empresa_do_contrato = None
+        if contrato and contrato.empresa_id:
+            empresa_do_contrato = db.query(Empresa).filter(Empresa.id == contrato.empresa_id).first()
+
         nf.contrato = contrato
         nf.anexos = db.query(Anexo).filter(Anexo.nf_id == nf.id).all()
-        if categoria is None or (contrato and contrato.categoria == categoria):
-            filtradas.append(nf)
+
+        if categoria is not None and (not contrato or contrato.categoria != categoria):
+            continue
+
+        if busca:
+            empresa_nome = (empresa_do_contrato.nome if empresa_do_contrato else '') or (nf.razao_nf or '') or ''
+            if busca not in empresa_nome.lower():
+                continue
+
+        filtradas.append(nf)
     db.close()
     return filtradas
+
+
+def normalize_nf_status(status: str | None) -> str:
+    status_normalizado = (status or "pendente").strip().lower()
+    if status_normalizado in {"paga", "pagas", "pago", "pagos", "confirmada", "confirmadas", "quitada", "quitadas"}:
+        return "paga"
+    return "pendente"
 
 
 def get_nf_alerts(limit: int = 5):
     hoje = date.today()
     alertas = []
     for nf in get_relatorio_data():
+        if normalize_nf_status(nf.status_conferencia) == "paga":
+            continue
         if nf.data_pagamento is None:
             continue
+
         dias_restantes = (nf.data_pagamento - hoje).days
         if dias_restantes < 0:
             continue
@@ -844,48 +1015,54 @@ def get_nf_alerts(limit: int = 5):
 
 
 def get_nf_status_summary(nfs):
-    hoje = date.today()
-    summary = {"pagas": 0, "pendentes": 0, "vencidas": 0}
+    summary = {"pagas": 0, "pendentes": 0}
     for nf in nfs:
-        status = (nf.status_conferencia or "pendente").lower()
-        if status == "confirmada":
+        status = normalize_nf_status(nf.status_conferencia)
+        if status == "paga":
             summary["pagas"] += 1
-            continue
-        if nf.data_pagamento is not None:
-            if nf.data_pagamento < hoje:
-                summary["vencidas"] += 1
-            else:
-                summary["pendentes"] += 1
         else:
             summary["pendentes"] += 1
     return summary
 
 
 @app.get("/relatorio")
-def relatorio(request: Request):
+def relatorio(request: Request, categoria: str | None = None, empresa: str | None = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=307)
 
-    nfs = get_relatorio_data()
-    fixos = get_relatorio_data("fixo")
-    pontuais = get_relatorio_data("pontual")
+    categoria_filtrada = normalize_report_category(categoria or request.query_params.get("categoria"))
+    empresa_busca = (empresa or request.query_params.get("empresa") or '').strip()
+    success_message = request.query_params.get("msg")
+
+    nfs = get_relatorio_data(categoria_filtrada, empresa_busca)
+    fixos = get_relatorio_data("fixo", empresa_busca)
+    pontuais = get_relatorio_data("pontual", empresa_busca)
     alertas = get_nf_alerts()
     status_totals = get_nf_status_summary(nfs)
     status_fixos = get_nf_status_summary(fixos)
     status_pontuais = get_nf_status_summary(pontuais)
+    categoria_label = categoria_filtrada or 'todos'
+    titulo = "Relatório geral"
+    if categoria_filtrada == "fixo":
+        titulo = "Contratos fixos"
+    elif categoria_filtrada == "pontual":
+        titulo = "Serviços pontuais"
+
     return templates.TemplateResponse(
         "relatorio.html",
         {
             "request": request,
             "nfs": nfs,
             "alertas": alertas,
-            "categoria": "todos",
-            "titulo": "Relatório geral",
+            "categoria": categoria_label,
+            "titulo": titulo,
             "fixos": fixos,
             "pontuais": pontuais,
             "status_totals": status_totals,
             "status_fixos": status_fixos,
             "status_pontuais": status_pontuais,
+            "filtro_empresa": empresa_busca,
+            "success_message": success_message,
             "format_currency_br": format_currency_br,
         },
     )
@@ -896,9 +1073,11 @@ def relatorio_fixo(request: Request):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=307)
 
-    nfs = get_relatorio_data("fixo")
-    fixos = get_relatorio_data("fixo")
-    pontuais = get_relatorio_data("pontual")
+    empresa_busca = (request.query_params.get("empresa") or '').strip()
+    nfs = get_relatorio_data("fixo", empresa_busca)
+    fixos = get_relatorio_data("fixo", empresa_busca)
+    pontuais = get_relatorio_data("pontual", empresa_busca)
+    success_message = request.query_params.get("msg")
     return templates.TemplateResponse(
         "relatorio.html",
         {
@@ -912,6 +1091,8 @@ def relatorio_fixo(request: Request):
             "status_totals": get_nf_status_summary(nfs),
             "status_fixos": get_nf_status_summary(fixos),
             "status_pontuais": get_nf_status_summary(pontuais),
+            "filtro_empresa": empresa_busca,
+            "success_message": success_message,
             "format_currency_br": format_currency_br,
         },
     )
@@ -922,9 +1103,11 @@ def relatorio_pontual(request: Request):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=307)
 
-    nfs = get_relatorio_data("pontual")
-    fixos = get_relatorio_data("fixo")
-    pontuais = get_relatorio_data("pontual")
+    empresa_busca = (request.query_params.get("empresa") or '').strip()
+    nfs = get_relatorio_data("pontual", empresa_busca)
+    fixos = get_relatorio_data("fixo", empresa_busca)
+    pontuais = get_relatorio_data("pontual", empresa_busca)
+    success_message = request.query_params.get("msg")
     return templates.TemplateResponse(
         "relatorio.html",
         {
@@ -938,6 +1121,8 @@ def relatorio_pontual(request: Request):
             "status_totals": get_nf_status_summary(nfs),
             "status_fixos": get_nf_status_summary(fixos),
             "status_pontuais": get_nf_status_summary(pontuais),
+            "filtro_empresa": empresa_busca,
+            "success_message": success_message,
             "format_currency_br": format_currency_br,
         },
     )
@@ -969,8 +1154,10 @@ def upload_anexo(
     db.commit()
     db.close()
 
-    mensagem = "Arquivo enviado"
-    return RedirectResponse(url=f"/?msg={quote(mensagem)}", status_code=303)
+    redirect_url = request.headers.get("referer") or "/relatorio"
+    if "/relatorio" not in redirect_url and "/" in redirect_url:
+        redirect_url = "/relatorio"
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @app.get("/anexos/{anexo_id}")
@@ -984,22 +1171,25 @@ def download_anexo(anexo_id: int):
     return Response(
         content=anexo.conteudo,
         media_type=anexo.mime_type or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{anexo.arquivo_nome}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{anexo.arquivo_nome}"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 
 @app.get("/relatorio/excel")
-def relatorio_excel(request: Request, categoria: str | None = None):
+def relatorio_excel(request: Request, categoria: str | None = None, empresa: str | None = None):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=307)
 
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-    categoria = (categoria or "").strip().lower()
-    if categoria in {"", "todos", "geral"}:
-        categoria = "geral"
-    elif categoria not in {"fixo", "pontual"}:
-        categoria = "geral"
+    categoria = normalize_report_category(categoria or request.query_params.get("categoria"))
+    empresa_busca = (empresa or request.query_params.get("empresa") or '').strip().lower()
+    category_name = "geral" if categoria is None else categoria
 
     db = SessionLocal()
     empresas = {empresa.id: empresa for empresa in db.query(Empresa).all()}
@@ -1021,9 +1211,13 @@ def relatorio_excel(request: Request, categoria: str | None = None):
                 continue
 
             empresa = empresas.get(contrato.empresa_id)
+            nome_empresa = (empresa.nome if empresa else "Empresa não vinculada")
+            if empresa_busca and empresa_busca not in nome_empresa.lower():
+                continue
+
             nf = get_last_nf_for_contrato(contrato.id)
             rows.append([
-                empresa.nome if empresa else "Empresa não vinculada",
+                nome_empresa,
                 contrato.descricao or "",
                 contrato.categoria or "",
                 contrato.tipo_servico or "",
@@ -1113,7 +1307,7 @@ def relatorio_excel(request: Request, categoria: str | None = None):
     filename_mapping = {
         "fixo": "relatorio_fixos_mercado_central.xlsx",
         "pontual": "relatorio_pontuais_mercado_central.xlsx",
-        "geral": "relatorio_geral_mercado_central.xlsx",
+        "geral": "relatorio_mercado_central.xlsx",
     }
     response = StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     response.headers["Content-Disposition"] = f"attachment; filename={filename_mapping[categoria]}"

@@ -6,8 +6,18 @@ from fastapi.testclient import TestClient
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-from app.database import SessionLocal, Empresa, Contato, Contrato, NF, Base, engine, seed_demo_data
-from app.main import app
+from app.database import (
+    SessionLocal,
+    Empresa,
+    Contato,
+    Contrato,
+    NF,
+    Anexo,
+    Base,
+    engine,
+    seed_demo_data,
+)
+from app.main import app, parse_invoice_from_text
 
 
 class ModelFlowTest(unittest.TestCase):
@@ -116,6 +126,76 @@ class ModelFlowTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Relatório de conferência", response.text)
+
+    def test_overdue_date_does_not_mark_nf_as_vencida_when_status_is_pending(self):
+        empresa = Empresa(nome="Empresa Atrasada", cnpj="00.000.000/0001-11", tipo="Cliente")
+        self.db.add(empresa)
+        self.db.commit()
+
+        contrato = Contrato(
+            empresa_id=empresa.id,
+            descricao="Contrato atrasado",
+            categoria="fixo",
+            tipo_servico="Manutenção",
+            valor_atual=900.0,
+            status="ativo",
+        )
+        self.db.add(contrato)
+        self.db.commit()
+
+        nf = NF(
+            contrato_id=contrato.id,
+            razao_nf="Empresa Atrasada",
+            numero_nf="NF-ATRASADA",
+            valor_nf=900.0,
+            data_pagamento=date(2024, 1, 15),
+            status_conferencia="pendente",
+        )
+        self.db.add(nf)
+        self.db.commit()
+
+        client = TestClient(app)
+        client.post("/login", data={"username": "mercado", "password": "mercado123"})
+        response = client.get("/relatorio")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Vencidas</span>", response.text)
+        self.assertIn("Pendente", response.text)
+
+    def test_nf_status_can_be_updated_to_paid_manually(self):
+        empresa = Empresa(nome="Empresa Pago", cnpj="00.000.000/0001-22", tipo="Cliente")
+        self.db.add(empresa)
+        self.db.commit()
+
+        contrato = Contrato(
+            empresa_id=empresa.id,
+            descricao="Contrato para pagar",
+            categoria="fixo",
+            tipo_servico="Manutenção",
+            valor_atual=600.0,
+            status="ativo",
+        )
+        self.db.add(contrato)
+        self.db.commit()
+
+        nf = NF(
+            contrato_id=contrato.id,
+            razao_nf="Empresa Pago",
+            numero_nf="NF-PAGA",
+            valor_nf=600.0,
+            data_pagamento=date(2026, 8, 20),
+            status_conferencia="pendente",
+        )
+        self.db.add(nf)
+        self.db.commit()
+
+        client = TestClient(app)
+        client.post("/login", data={"username": "mercado", "password": "mercado123"})
+        response = client.post(f"/nfs/{nf.id}/status", data={"status_conferencia": "paga"})
+
+        self.assertEqual(response.status_code, 303)
+        updated = self.db.query(NF).filter(NF.id == nf.id).first()
+        self.assertEqual(updated.status_conferencia, "paga")
 
     def test_report_page_has_polished_layout_markers(self):
         empresa = Empresa(nome="Empresa Layout", cnpj="00.000.000/0001-77", tipo="Cliente")
@@ -388,6 +468,38 @@ class ModelFlowTest(unittest.TestCase):
         self.assertEqual(payload["data_nf"], "24/12/2024")
         self.assertEqual(payload["empresa_nome"], "PRINCIPAL VAREJO DE COSMÉTICOS")
 
+    def test_nf_creation_keeps_manual_value_when_imported_value_is_wrong_or_blank(self):
+        client = TestClient(app)
+        client.post("/login", data={"username": "mercado", "password": "mercado123"})
+
+        sample = "NF-e N° 1065444\nDATA DE RECEBIMENTO 24/12/2024\nPRINCIPAL VAREJO DE COSMÉTICOS\nTOTAL DA NOTA R$ 67,90".encode("utf-8")
+        response = client.post(
+            "/nfs",
+            data={
+                "contrato_id": "",
+                "empresa_nome": "Empresa NF Manual",
+                "categoria": "pontual",
+                "tipo_servico": "Limpeza",
+                "descricao_contrato": "Contrato de limpeza",
+                "razao_nf": "Empresa NF Manual",
+                "data_nf": "2026-08-15",
+                "numero_nf": "NF-002",
+                "valor_nf": "350.75",
+                "data_pagamento": "2026-08-20",
+                "forma_pagamento": "PIX",
+                "status_conferencia": "pendente",
+                "descricao_item": "",
+                "observacoes": "",
+            },
+            files={"file": ("nf-1065444.txt", sample, "text/plain")},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        nf = self.db.query(NF).filter(NF.numero_nf == "NF-002").first()
+        self.assertIsNotNone(nf)
+        self.assertEqual(nf.valor_nf, 350.75)
+
     def test_nf_creation_can_auto_create_company_and_contract(self):
         client = TestClient(app)
         client.post("/login", data={"username": "mercado", "password": "mercado123"})
@@ -535,10 +647,8 @@ class ModelFlowTest(unittest.TestCase):
         self.assertIn("Pontuais", response.text)
         self.assertIn("Pagas fixas", response.text)
         self.assertIn("Pendentes fixas", response.text)
-        self.assertIn("Vencidas fixas", response.text)
         self.assertIn("Pagas pontuais", response.text)
         self.assertIn("Pendentes pontuais", response.text)
-        self.assertIn("Vencidas pontuais", response.text)
 
     def test_report_excel_export_works(self):
         empresa = Empresa(nome="Empresa Export", cnpj="00.000.000/0001-55", tipo="Cliente")
@@ -724,6 +834,35 @@ class ModelFlowTest(unittest.TestCase):
         self.assertEqual(self.db.query(Contrato).filter(Contrato.empresa_id == self.db.query(Empresa).filter(Empresa.nome == "Empresa Upload").first().id).count(), 1)
         self.assertEqual(self.db.query(NF).filter(NF.numero_nf == "NF-005").count(), 1)
 
+    def test_new_nf_upload_creates_downloadable_attachment(self):
+        client = TestClient(app)
+        client.post("/login", data={"username": "mercado", "password": "mercado123"})
+
+        response = client.post(
+            "/nfs",
+            data={
+                "empresa_nome": "Empresa Nova NF",
+                "categoria": "fixo",
+                "tipo_servico": "Manutenção",
+                "descricao_contrato": "Contrato Nova NF",
+                "razao_nf": "Empresa Nova NF",
+                "numero_nf": "NF-NEW-001",
+                "valor_nf": "1200,00",
+                "data_nf": "15/08/2026",
+                "data_pagamento": "20/08/2026",
+                "forma_pagamento": "PIX",
+            },
+            files={"file": ("Empresa Nova NF NF-NEW-001 1200.pdf", b"conteudo pdf", "application/pdf")},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        nf = self.db.query(NF).filter(NF.numero_nf == "NF-NEW-001").first()
+        self.assertIsNotNone(nf)
+        anexos = self.db.query(Anexo).filter(Anexo.nf_id == nf.id).all()
+        self.assertEqual(len(anexos), 1)
+        self.assertEqual(anexos[0].arquivo_nome, "Empresa Nova NF NF-NEW-001 1200.pdf")
+
     def test_can_upload_attachment_for_nf(self):
         empresa = Empresa(nome="Empresa doc", cnpj="00.000.000/0001-88", tipo="Cliente")
         self.db.add(empresa)
@@ -760,11 +899,12 @@ class ModelFlowTest(unittest.TestCase):
             "/anexos",
             data={"empresa_id": str(empresa.id), "contrato_id": str(contrato.id), "nf_id": str(nf.id)},
             files={"file": ("nota.pdf", b"conteudo pdf", "application/pdf")},
+            headers={"referer": "http://testserver/relatorio"},
             follow_redirects=False,
         )
 
         self.assertEqual(response.status_code, 303)
-        self.assertIn("msg=Arquivo%20enviado", response.headers.get("location", ""))
+        self.assertEqual(response.headers.get("location"), "http://testserver/relatorio")
 
 
 if __name__ == "__main__":

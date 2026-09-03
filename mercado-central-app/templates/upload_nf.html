@@ -84,11 +84,38 @@
   const nfFileInput = document.getElementById('nf-file');
   const camposAutomaticos = ['numero_nf', 'data_nf', 'valor_nf', 'empresa_nome', 'razao_nf', 'data_pagamento'];
 
+  function normalizarValorParaComparacao(valor) {
+    if (valor === null || valor === undefined) return '';
+    const texto = String(valor).trim();
+    if (!texto) return '';
+
+    return texto
+      .replace(/R\$/gi, '')
+      .replace(/\s+/g, '')
+      .replace(/\./g, '')
+      .replace(',', '.')
+      .replace(/[^\d.-]/g, '')
+      .trim();
+  }
+
+  function deveLimparCampoAutomatico(input) {
+    if (!input) return false;
+
+    const valorAutomatico = input.dataset.autoValor || '';
+    if (!valorAutomatico) return false;
+
+    const valorAtual = input.value || '';
+    if (valorAtual === valorAutomatico) return true;
+    if (normalizarValorParaComparacao(valorAtual) === normalizarValorParaComparacao(valorAutomatico)) return true;
+    if (formatarValorMoeda(valorAutomatico) === valorAtual) return true;
+
+    return false;
+  }
+
   function registrarEdicaoManual(input) {
     if (!input) return;
 
-    const valorAutomatico = input.dataset.autoValor || '';
-    if (valorAutomatico && input.value === valorAutomatico) {
+    if (deveLimparCampoAutomatico(input)) {
       input.value = '';
     }
 
@@ -178,27 +205,30 @@
       });
     } else if (fieldId === 'valor_nf') {
       input.addEventListener('focus', () => {
-        const valorAutomatico = input.dataset.autoValor || '';
-        if (valorAutomatico && input.value === valorAutomatico) {
+        if (deveLimparCampoAutomatico(input)) {
           input.value = '';
         }
       });
       input.addEventListener('input', () => {
         registrarEdicaoManual(input);
-        const texto = input.value.replace(/[^\d,.-]/g, '');
+        input.value = String(input.value || '').replace(/\D/g, '');
+      });
+      input.addEventListener('blur', () => {
+        const texto = String(input.value || '').replace(/\D/g, '');
         if (!texto) {
-          input.value = 'R$ ';
+          input.value = '';
           return;
         }
-        const numero = parseValorMonetarioParaNumero(texto);
-        if (!Number.isNaN(numero)) {
-          input.value = formatarValorMoeda(numero);
-        }
+
+        const numero = Number(texto);
+        input.value = `R$ ${numero.toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        })}`;
       });
     } else {
       input.addEventListener('focus', () => {
-        const valorAutomatico = input.dataset.autoValor || '';
-        if (valorAutomatico && input.value === valorAutomatico) {
+        if (deveLimparCampoAutomatico(input)) {
           input.value = '';
         }
       });

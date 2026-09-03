@@ -3,6 +3,12 @@
 {% block title %}Relatório de conferência{% endblock %}
 
 {% block content %}
+{% if success_message %}
+  <div class="toast-success" role="status" aria-live="polite">
+    ✅ {{ success_message }}
+  </div>
+{% endif %}
+
 <section class="report-shell">
   <div class="report-topbar">
     <div>
@@ -12,7 +18,8 @@
 
     <div class="report-actions no-print">
       {% set categoria_export = categoria if categoria in ['fixo', 'pontual'] else 'todos' %}
-      <a class="btn-primary" href="/relatorio/excel?categoria={{ categoria_export }}">📊 Exportar Excel</a>
+      <a class="btn-upload" href="/nfs/upload-page">📦 Upload da NF</a>
+      <a class="btn-secondary" href="/relatorio/excel?categoria={{ categoria_export }}{% if filtro_empresa %}&empresa={{ filtro_empresa|urlencode }}{% endif %}">📊 Exportar Excel</a>
       <div class="print-inline-block">
         <button type="button" class="btn-secondary" id="print-pdf-button">🖨️ Imprimir PDF</button>
         <label class="print-inline-label">
@@ -29,9 +36,9 @@
 
   {% if categoria == 'todos' %}
     <nav class="report-tabs no-print" aria-label="Relatórios por categoria">
-      <a href="/relatorio" class="report-tab {% if categoria == 'todos' %}active{% endif %}">Geral</a>
-      <a href="/relatorio/fixo" class="report-tab {% if categoria == 'fixo' %}active{% endif %}">Fixos</a>
-      <a href="/relatorio/pontual" class="report-tab {% if categoria == 'pontual' %}active{% endif %}">Pontuais</a>
+      <a href="/relatorio{% if filtro_empresa %}?empresa={{ filtro_empresa|urlencode }}{% endif %}" class="report-tab {% if categoria == 'todos' %}active{% endif %}">Geral</a>
+      <a href="/relatorio/fixo{% if filtro_empresa %}?empresa={{ filtro_empresa|urlencode }}{% endif %}" class="report-tab {% if categoria == 'fixo' %}active{% endif %}">Fixos</a>
+      <a href="/relatorio/pontual{% if filtro_empresa %}?empresa={{ filtro_empresa|urlencode }}{% endif %}" class="report-tab {% if categoria == 'pontual' %}active{% endif %}">Pontuais</a>
     </nav>
   {% endif %}
 
@@ -69,16 +76,35 @@
       {% for alerta in alertas %}
         <div class="alert-card alert-{{ alerta.nivel }}">
           <strong>{{ alerta.nf.numero_nf or 'NF sem número' }}</strong>
-          <span>Próximo do vencimento: {{ alerta.dias_restantes }} dias</span>
+          <span>Pagamento pendente: {{ alerta.dias_restantes }} dias</span>
           <small>{{ alerta.nf.contrato.descricao if alerta.nf.contrato else 'Contrato não vinculado' }}</small>
         </div>
       {% endfor %}
     {% else %}
       <div class="alert-card alert-neutral">
-        Nenhuma NF próxima do vencimento nos próximos 30 dias.
+        Nenhuma NF pendente nos próximos 30 dias.
       </div>
     {% endif %}
   </div>
+
+  <form method="get" action="/relatorio" class="report-filters no-print">
+    <div class="filter-field">
+      <label for="empresa-filtro">Empresa</label>
+      <input id="empresa-filtro" name="empresa" type="text" value="{{ filtro_empresa or '' }}" placeholder="Buscar por empresa" />
+    </div>
+    <div class="filter-field">
+      <label for="categoria-filtro">Tipo de contrato</label>
+      <select id="categoria-filtro" name="categoria">
+        <option value="todos" {% if categoria == 'todos' %}selected{% endif %}>Todos</option>
+        <option value="fixo" {% if categoria == 'fixo' %}selected{% endif %}>Fixos</option>
+        <option value="pontual" {% if categoria == 'pontual' %}selected{% endif %}>Pontuais</option>
+      </select>
+    </div>
+    <button type="submit" class="btn-primary">Buscar</button>
+    {% if filtro_empresa or categoria != 'todos' %}
+      <a href="/relatorio" class="btn-secondary">Limpar</a>
+    {% endif %}
+  </form>
 
   <div class="report-summary no-print">
     <div class="summary-card">
@@ -97,10 +123,6 @@
       <span>Pendentes</span>
       <strong>{{ status_totals.pendentes if status_totals else 0 }}</strong>
     </div>
-    <div class="summary-card">
-      <span>Vencidas</span>
-      <strong>{{ status_totals.vencidas if status_totals else 0 }}</strong>
-    </div>
   </div>
 
   <div class="report-section-grid no-print">
@@ -109,7 +131,6 @@
       <strong>{{ fixos|length }}</strong>
       <small>Pagas fixas: {{ status_fixos.pagas if status_fixos else 0 }}</small>
       <small>Pendentes fixas: {{ status_fixos.pendentes if status_fixos else 0 }}</small>
-      <small>Vencidas fixas: {{ status_fixos.vencidas if status_fixos else 0 }}</small>
       <a href="/relatorio/fixo">Ver relatório fixo</a>
     </section>
     <section class="report-mini-card">
@@ -117,7 +138,6 @@
       <strong>{{ pontuais|length }}</strong>
       <small>Pagas pontuais: {{ status_pontuais.pagas if status_pontuais else 0 }}</small>
       <small>Pendentes pontuais: {{ status_pontuais.pendentes if status_pontuais else 0 }}</small>
-      <small>Vencidas pontuais: {{ status_pontuais.vencidas if status_pontuais else 0 }}</small>
       <a href="/relatorio/pontual">Ver relatório pontual</a>
     </section>
     <section class="report-mini-card">
@@ -125,7 +145,6 @@
       <strong>{{ nfs|length }}</strong>
       <small>Pagas gerais: {{ status_totals.pagas if status_totals else 0 }}</small>
       <small>Pendentes gerais: {{ status_totals.pendentes if status_totals else 0 }}</small>
-      <small>Vencidas gerais: {{ status_totals.vencidas if status_totals else 0 }}</small>
       <a href="/relatorio">Ver relatório geral</a>
     </section>
   </div>
@@ -142,6 +161,7 @@
           <th>Valor</th>
           <th>Pagamento</th>
           <th>Status</th>
+          <th>Descrição / Obs.</th>
           <th>Anexos</th>
         </tr>
       </thead>
@@ -155,23 +175,48 @@
           <td>{{ nf.numero_nf or '-' }}</td>
           <td class="money">R$ {{ format_currency_br(nf.valor_nf or 0) }}</td>
           <td>{{ nf.data_pagamento.strftime('%d/%m/%Y') if nf.data_pagamento else '-' }}</td>
-          <td>
-            <span class="status-badge status-{{ (nf.status_conferencia or 'pendente')|lower|replace(' ', '-') }}">
-              {{ nf.status_conferencia or 'Pendente' }}
-            </span>
+          <td class="status-cell">
+            {% set status_raw = nf.status_conferencia or 'pendente' %}
+            {% set status_value = status_raw|lower %}
+            {% set is_paid = status_value in ['paga', 'pagas', 'pago', 'pagos', 'confirmada', 'confirmadas', 'quitada', 'quitadas'] %}
+            <div class="status-editor">
+              <form method="post" action="/nfs/{{ nf.id }}/status" class="status-update-form">
+                <select name="status_conferencia" class="status-select">
+                  <option value="pendente" {% if not is_paid %}selected{% endif %}>Pendente</option>
+                  <option value="paga" {% if is_paid %}selected{% endif %}>Paga</option>
+                </select>
+                <button type="submit" class="btn-mini">Salvar</button>
+              </form>
+            </div>
+          </td>
+          <td class="report-note-cell">
+            {% set descricao_item = nf.descricao_item or '' %}
+            {% set observacoes = nf.observacoes or '' %}
+            {% if descricao_item or observacoes %}
+              {% if descricao_item %}
+                <div class="report-note-item">{{ descricao_item }}</div>
+              {% endif %}
+              {% if observacoes %}
+                <div class="report-note-observation">{{ observacoes }}</div>
+              {% endif %}
+            {% else %}
+              <span class="report-note-empty">-</span>
+            {% endif %}
           </td>
           <td class="attachment-cell">
-            {% if nf.anexos %}
-              {% for anexo in nf.anexos %}
-                <a href="/anexos/{{ anexo.id }}" class="download-link no-print" target="_blank">{{ anexo.arquivo_nome }}</a>
-              {% endfor %}
-            {% endif %}
             <form method="post" action="/anexos" enctype="multipart/form-data" class="upload-form no-print">
               <input type="hidden" name="empresa_id" value="{{ nf.contrato.empresa_id if nf.contrato else 0 }}" />
               <input type="hidden" name="contrato_id" value="{{ nf.contrato.id if nf.contrato else 0 }}" />
               <input type="hidden" name="nf_id" value="{{ nf.id }}" />
-              <input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx" />
-              <button type="submit">Upload</button>
+              {% if nf.anexos %}
+                <a href="/anexos/{{ nf.anexos[0].id }}" class="upload-download-btn" download="{{ nf.anexos[0].arquivo_nome }}" title="{{ nf.anexos[0].arquivo_nome }}">📥 Baixar NF</a>
+              {% else %}
+                <label class="upload-file-label">
+                  <span>Escolher arquivo</span>
+                  <input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.doc,.docx" />
+                </label>
+                <button type="submit">Upload</button>
+              {% endif %}
             </form>
           </td>
         </tr>
